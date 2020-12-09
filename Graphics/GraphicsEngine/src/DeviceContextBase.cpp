@@ -773,4 +773,39 @@ bool VerifyTraceRaysAttribs(const TraceRaysAttribs& Attribs)
     return true;
 }
 
+bool VerifyTraceRaysIndirectAttribs(const IRenderDevice* pDevice, const TraceRaysIndirectAttribs& Attribs, const IBuffer* pAttribsBuffer)
+{
+#define CHECK_TRACE_RAYS_INDIRECT_ATTRIBS(Expr, ...) CHECK_PARAMETER(Expr, "Trace rays indirect attribs are invalid: ", __VA_ARGS__)
+    CHECK_TRACE_RAYS_INDIRECT_ATTRIBS(Attribs.pSBT != nullptr, "pSBT must not be null");
+
+#ifdef DILIGENT_DEVELOPMENT
+    CHECK_TRACE_RAYS_INDIRECT_ATTRIBS(Attribs.pSBT->Verify(SHADER_BINDING_VALIDATION_SHADER_ONLY | SHADER_BINDING_VALIDATION_TLAS),
+                                      "not all shaders in SBT are bound or instance to shader mapping is incorrect");
+#endif // DILIGENT_DEVELOPMENT
+
+    CHECK_TRACE_RAYS_INDIRECT_ATTRIBS(pAttribsBuffer != nullptr, "indirect dispatch arguments buffer must not be null.");
+
+    const auto& Desc = pAttribsBuffer->GetDesc();
+    CHECK_TRACE_RAYS_INDIRECT_ATTRIBS((Desc.BindFlags & BIND_INDIRECT_DRAW_ARGS) != 0,
+                                      "indirect trace rays arguments buffer '", Desc.Name, "' was not created with BIND_INDIRECT_DRAW_ARGS flag.");
+    CHECK_TRACE_RAYS_INDIRECT_ATTRIBS(Attribs.ArgsByteOffset + Attribs.ArgsByteSize <= Desc.uiSizeInBytes,
+                                      "indirect trace rays arguments buffer '", Desc.Name, "' is too small.");
+
+    if (pDevice->GetDeviceCaps().IsVulkanDevice())
+    {
+        CHECK_TRACE_RAYS_INDIRECT_ATTRIBS((Desc.BindFlags & BIND_RAY_TRACING) != 0,
+                                          "indirect trace rays arguments buffer '", Desc.Name, "' was not created with BIND_RAY_TRACING flag.");
+        CHECK_TRACE_RAYS_INDIRECT_ATTRIBS(Attribs.ArgsByteSize == 12 || Attribs.ArgsByteSize == 104,
+                                          "ArgsByteSize must be 12 or 104 bytes");
+    }
+    else
+    {
+        CHECK_TRACE_RAYS_INDIRECT_ATTRIBS(Attribs.ArgsByteSize == 104, "ArgsByteSize must be 104 bytes");
+    }
+
+#undef CHECK_TRACE_RAYS_INDIRECT_ATTRIBS
+
+    return true;
+}
+
 } // namespace Diligent

@@ -316,6 +316,7 @@ RenderDeviceGLImpl::RenderDeviceGLImpl(IReferenceCounters*       pRefCounters,
     SET_FEATURE_STATE(VertexPipelineUAVWritesAndAtomics, false, "Vertex pipeline UAV writes and atomics are");
     SET_FEATURE_STATE(MeshShaders, false, "Mesh shaders are");
     SET_FEATURE_STATE(RayTracing, false, "Ray tracing is");
+    SET_FEATURE_STATE(RayTracing2, false, "Inline ray tracing is");
 
     {
         bool WireframeFillSupported = (glPolygonMode != nullptr);
@@ -467,7 +468,7 @@ RenderDeviceGLImpl::RenderDeviceGLImpl(IReferenceCounters*       pRefCounters,
 #undef SET_FEATURE_STATE
 
 #if defined(_MSC_VER) && defined(_WIN64)
-    static_assert(sizeof(DeviceFeatures) == 32, "Did you add a new feature to DeviceFeatures? Please handle its satus here.");
+    static_assert(sizeof(DeviceFeatures) == 33, "Did you add a new feature to DeviceFeatures? Please handle its satus here.");
 #endif
 }
 

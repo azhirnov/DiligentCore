@@ -428,6 +428,56 @@ void main(inout RTPayload payload, in BuiltInTriangleIntersectionAttributes attr
 // clang-format on
 
 
+// clang-format off
+const std::string RayTracingTest6_PS{R"hlsl(
+RaytracingAccelerationStructure g_TLAS;
+RWTexture2D<float4>             g_ColorBuffer;
+
+float4 HitShader(float2 attrBarycentrics)
+{
+    float3 barycentrics = float3(1.0 - attrBarycentrics.x - attrBarycentrics.y, attrBarycentrics.x, attrBarycentrics.y);
+    return float4(barycentrics, 1.0);
+}
+
+float4 MissShader()
+{
+    return float4(1.0, 0.0, 0.0, 1.0);
+}
+
+[shader("raygeneration")]
+void main()
+{
+    const float2 uv = float2(DispatchRaysIndex().xy) / float2(DispatchRaysDimensions().xy - 1);
+
+    RayDesc ray;
+    ray.Origin    = float3(uv.x, 1.0 - uv.y, -1.0);
+    ray.Direction = float3(0.0, 0.0, 1.0);
+    ray.TMin      = 0.01;
+    ray.TMax      = 10.0;
+
+    RayQuery<RAY_FLAG_NONE> q;
+
+    q.TraceRayInline(g_TLAS,         // Acceleration Structure
+                     RAY_FLAG_NONE,  // Ray Flags
+                     ~0,             // Instance Inclusion Mask
+                     ray);
+
+    q.Proceed();
+
+    float4 Color;
+    if (q.CommittedStatus() == COMMITTED_TRIANGLE_HIT)
+    {
+        Color = HitShader(q.CommittedTriangleBarycentrics());
+    }
+    else
+    {
+        Color = MissShader();
+    }
+    g_ColorBuffer[DispatchRaysIndex().xy] = Color;
+}
+)hlsl"};
+// clang-format on
+
 } // namespace HLSL
 
 } // namespace

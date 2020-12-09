@@ -1497,4 +1497,161 @@ TEST(RayTracingTest, ResourceBinding)
     ASSERT_NE(pRayTracingSRB->GetVariableByName(SHADER_TYPE_RAY_CLOSEST_HIT, "g_Texture2"), nullptr);
 }
 
+
+class RT5 : public testing::TestWithParam<int>
+{};
+
+TEST_P(RT5, InlineRayTracing)
+{
+    Uint32 TestId  = GetParam();
+    auto*  pEnv    = TestingEnvironment::GetInstance();
+    auto*  pDevice = pEnv->GetDevice();
+    if (!pDevice->GetDeviceCaps().Features.RayTracing2)
+    {
+        GTEST_SKIP() << "Inline ray tracing is not supported by this device";
+    }
+
+    auto* pSwapChain = pEnv->GetSwapChain();
+    auto* pContext   = pEnv->GetDeviceContext();
+
+    RefCntAutoPtr<ITestingSwapChain> pTestingSwapChain(pSwapChain, IID_TestingSwapChain);
+    if (pTestingSwapChain)
+    {
+        pContext->Flush();
+        pContext->InvalidateState();
+
+        auto deviceType = pDevice->GetDeviceCaps().DevType;
+        switch (deviceType)
+        {
+#if D3D12_SUPPORTED
+            case RENDER_DEVICE_TYPE_D3D12:
+                RayTracingTriangleClosestHitReferenceD3D12(pSwapChain);
+                break;
+#endif
+
+#if VULKAN_SUPPORTED
+            case RENDER_DEVICE_TYPE_VULKAN:
+                RayTracingTriangleClosestHitReferenceVk(pSwapChain);
+                break;
+#endif
+
+            default:
+                LOG_ERROR_AND_THROW("Unsupported device type");
+        }
+
+        pTestingSwapChain->TakeSnapshot();
+    }
+    TestingEnvironment::ScopedReleaseResources EnvironmentAutoReset;
+
+    RayTracingPipelineStateCreateInfo PSOCreateInfo;
+
+    PSOCreateInfo.PSODesc.Name         = "Ray tracing PSO";
+    PSOCreateInfo.PSODesc.PipelineType = PIPELINE_TYPE_RAY_TRACING;
+
+    ShaderCreateInfo ShaderCI;
+    ShaderCI.SourceLanguage = SHADER_SOURCE_LANGUAGE_HLSL;
+    ShaderCI.ShaderCompiler = SHADER_COMPILER_DXC;
+    ShaderCI.HLSLVersion    = {6, 5};
+    ShaderCI.EntryPoint     = "main";
+
+    RefCntAutoPtr<IShader> pRG;
+    {
+        ShaderCI.Desc.ShaderType = SHADER_TYPE_RAY_GEN;
+        ShaderCI.Desc.Name       = "Ray tracing RG";
+        ShaderCI.Source          = HLSL::RayTracingTest6_PS.c_str();
+        pDevice->CreateShader(ShaderCI, &pRG);
+        ASSERT_NE(pRG, nullptr);
+    }
+
+    const RayTracingGeneralShaderGroup GeneralShaders[] = {{"Main", pRG}};
+
+    PSOCreateInfo.pGeneralShaders    = GeneralShaders;
+    PSOCreateInfo.GeneralShaderCount = _countof(GeneralShaders);
+
+    PSOCreateInfo.RayTracingPipeline.MaxRecursionDepth       = 1;
+    PSOCreateInfo.PSODesc.ResourceLayout.DefaultVariableType = SHADER_RESOURCE_VARIABLE_TYPE_MUTABLE;
+
+    RefCntAutoPtr<IPipelineState> pRayTracingPSO;
+    pDevice->CreateRayTracingPipelineState(PSOCreateInfo, &pRayTracingPSO);
+    ASSERT_NE(pRayTracingPSO, nullptr);
+
+    RefCntAutoPtr<IShaderResourceBinding> pRayTracingSRB;
+    pRayTracingPSO->CreateShaderResourceBinding(&pRayTracingSRB, true);
+    ASSERT_NE(pRayTracingSRB, nullptr);
+
+    const auto& Vertices = TestingConstants::TriangleClosestHit::Vertices;
+
+    RefCntAutoPtr<IBuffer> pVertexBuffer;
+    {
+        BufferDesc BuffDesc;
+        BuffDesc.Name          = "Triangle vertices";
+        BuffDesc.Usage         = USAGE_IMMUTABLE;
+        BuffDesc.BindFlags     = BIND_RAY_TRACING;
+        BuffDesc.uiSizeInBytes = sizeof(Vertices);
+
+        BufferData BufData;
+        BufData.pData    = Vertices;
+        BufData.DataSize = sizeof(Vertices);
+
+        pDevice->CreateBuffer(BuffDesc, &BufData, &pVertexBuffer);
+        ASSERT_NE(pVertexBuffer, nullptr);
+    }
+
+    BLASBuildTriangleData Triangle;
+    Triangle.GeometryName         = "Triangle";
+    Triangle.pVertexBuffer        = pVertexBuffer;
+    Triangle.VertexStride         = sizeof(Vertices[0]);
+    Triangle.VertexCount          = _countof(Vertices);
+    Triangle.VertexValueType      = VT_FLOAT32;
+    Triangle.VertexComponentCount = 3;
+    Triangle.Flags                = RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+
+    RefCntAutoPtr<IBottomLevelAS> pTempBLAS;
+    CreateBLAS(pDevice, pContext, &Triangle, 1, TestBLASUpdate(TestId), pTempBLAS);
+
+    RefCntAutoPtr<IBottomLevelAS> pBLAS;
+    BLASCompaction(TestId, pDevice, pContext, pTempBLAS, pBLAS);
+
+    TLASBuildInstanceData Instance;
+    Instance.InstanceName = "Instance";
+    Instance.pBLAS        = pBLAS;
+    Instance.Flags        = RAYTRACING_INSTANCE_NONE;
+
+    RefCntAutoPtr<ITopLevelAS> pTempTLAS;
+    const Uint32               HitGroupStride = 1;
+    CreateTLAS(pDevice, pContext, &Instance, 1, HitGroupStride, TestTLASUpdate(TestId), pTempTLAS);
+
+    RefCntAutoPtr<ITopLevelAS> pTLAS;
+    TLASCompaction(TestId, pDevice, pContext, pTempTLAS, pTLAS);
+
+    ShaderBindingTableDesc SBTDesc;
+    SBTDesc.Name = "SBT";
+    SBTDesc.pPSO = pRayTracingPSO;
+
+    RefCntAutoPtr<IShaderBindingTable> pSBT;
+    pDevice->CreateSBT(SBTDesc, &pSBT);
+    ASSERT_NE(pSBT, nullptr);
+
+    pSBT->BindRayGenShader("Main");
+
+    pRayTracingSRB->GetVariableByName(SHADER_TYPE_RAY_GEN, "g_TLAS")->Set(pTLAS);
+    pRayTracingSRB->GetVariableByName(SHADER_TYPE_RAY_GEN, "g_ColorBuffer")->Set(pTestingSwapChain->GetCurrentBackBufferUAV());
+
+    pContext->SetPipelineState(pRayTracingPSO);
+    pContext->CommitShaderResources(pRayTracingSRB, RESOURCE_STATE_TRANSITION_MODE_TRANSITION);
+
+    const auto& SCDesc = pSwapChain->GetDesc();
+
+    TraceRaysAttribs Attribs;
+    Attribs.DimensionX        = SCDesc.Width;
+    Attribs.DimensionY        = SCDesc.Height;
+    Attribs.pSBT              = pSBT;
+    Attribs.SBTTransitionMode = RESOURCE_STATE_TRANSITION_MODE_TRANSITION;
+
+    pContext->TraceRays(Attribs);
+
+    pSwapChain->Present();
+}
+INSTANTIATE_TEST_SUITE_P(RayTracingTest, RT5, TestParamRange, TestIdToString);
+
 } // namespace

@@ -153,6 +153,7 @@ RenderDeviceD3D11Impl::RenderDeviceD3D11Impl(IReferenceCounters*          pRefCo
     UNSUPPORTED_FEATURE(VertexPipelineUAVWritesAndAtomics, "Vertex pipeline UAV writes and atomics are");
     UNSUPPORTED_FEATURE(MeshShaders, "Mesh shaders are");
     UNSUPPORTED_FEATURE(RayTracing, "Ray tracing is");
+    UNSUPPORTED_FEATURE(RayTracing2, "Inline ray tracing is");
 
     {
         bool ShaderFloat16Supported = false;
@@ -182,7 +183,7 @@ RenderDeviceD3D11Impl::RenderDeviceD3D11Impl(IReferenceCounters*          pRefCo
 #undef UNSUPPORTED_FEATURE
 
 #if defined(_MSC_VER) && defined(_WIN64)
-    static_assert(sizeof(DeviceFeatures) == 32, "Did you add a new feature to DeviceFeatures? Please handle its satus here.");
+    static_assert(sizeof(DeviceFeatures) == 33, "Did you add a new feature to DeviceFeatures? Please handle its satus here.");
 #endif
 
     auto& TexCaps = m_DeviceCaps.TexCaps;
