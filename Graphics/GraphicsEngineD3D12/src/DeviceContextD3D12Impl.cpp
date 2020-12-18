@@ -1418,6 +1418,15 @@ void DeviceContextD3D12Impl::CopyBuffer(IBuffer*                       pSrcBuffe
     ++m_State.NumCommands;
 }
 
+void DeviceContextD3D12Impl::FillBuffer(IBuffer*                       pDstBuffer,
+                                     Uint32                         DstOffset,
+                                     Uint32                         Size,
+                                     Uint32                         Pattern,
+                                     RESOURCE_STATE_TRANSITION_MODE BufferTransitionMode)
+{
+    UNSUPPORTED("FillBuffer is not supported yet");
+}
+
 void DeviceContextD3D12Impl::MapBuffer(IBuffer* pBuffer, MAP_TYPE MapType, MAP_FLAGS MapFlags, PVoid& pMappedData)
 {
     TDeviceContextBase::MapBuffer(pBuffer, MapType, MapFlags, pMappedData);

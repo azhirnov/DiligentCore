@@ -1982,7 +1982,14 @@ DILIGENT_BEGIN_INTERFACE(IDeviceContext, IObject)
                                     Uint32                         DstOffset,
                                     Uint32                         Size,
                                     RESOURCE_STATE_TRANSITION_MODE DstBufferTransitionMode) PURE;
-
+    
+    /// AZ TODO
+    VIRTUAL void METHOD(FillBuffer)(THIS_
+                                    IBuffer*                       pDstBuffer,
+                                    Uint32                         DstOffset,
+                                    Uint32                         Size,
+                                    Uint32                         Pattern,
+                                    RESOURCE_STATE_TRANSITION_MODE BufferTransitionMode) PURE;
 
     /// Maps the buffer.
 

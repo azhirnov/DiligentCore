@@ -1462,6 +1462,31 @@ void DeviceContextVkImpl::CopyBuffer(IBuffer*                       pSrcBuffer,
     ++m_State.NumCommands;
 }
 
+void DeviceContextVkImpl::FillBuffer(IBuffer*                       pDstBuffer,
+                                     Uint32                         DstOffset,
+                                     Uint32                         Size,
+                                     Uint32                         Pattern,
+                                     RESOURCE_STATE_TRANSITION_MODE BufferTransitionMode)
+{
+    // AZ TODO: validate arguments
+
+    auto* pDstBuffVk = ValidatedCast<BufferVkImpl>(pDstBuffer);
+
+#ifdef DILIGENT_DEVELOPMENT
+    if (pDstBuffVk->GetDesc().Usage == USAGE_DYNAMIC)
+    {
+        LOG_ERROR("Dynamic buffers cannot be fill destinations");
+        return;
+    }
+#endif
+
+    EnsureVkCmdBuffer();
+    TransitionOrVerifyBufferState(*pDstBuffVk, BufferTransitionMode, RESOURCE_STATE_COPY_DEST, VK_ACCESS_TRANSFER_WRITE_BIT, "Using buffer as clear destination (DeviceContextVkImpl::FillBuffer)");
+
+    m_CommandBuffer.FillBuffer(pDstBuffVk->GetVkBuffer(), DstOffset, Size, Pattern);
+    ++m_State.NumCommands;
+}
+
 void DeviceContextVkImpl::MapBuffer(IBuffer* pBuffer, MAP_TYPE MapType, MAP_FLAGS MapFlags, PVoid& pMappedData)
 {
     TDeviceContextBase::MapBuffer(pBuffer, MapType, MapFlags, pMappedData);

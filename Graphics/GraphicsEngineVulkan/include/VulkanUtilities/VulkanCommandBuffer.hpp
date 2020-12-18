@@ -423,6 +423,22 @@ public:
         VERIFY_EXPR(m_VkCmdBuffer != VK_NULL_HANDLE);
         vkCmdBindDescriptorSets(m_VkCmdBuffer, pipelineBindPoint, layout, firstSet, descriptorSetCount, pDescriptorSets, dynamicOffsetCount, pDynamicOffsets);
     }
+    
+    __forceinline void FillBuffer(VkBuffer     dstBuffer,
+                                  VkDeviceSize dstOffset,
+                                  VkDeviceSize size,
+                                  uint32_t     data)
+    {
+        VERIFY_EXPR(m_VkCmdBuffer != VK_NULL_HANDLE);
+        if (m_State.RenderPass != VK_NULL_HANDLE)
+        {
+            // Copy buffer operation must be performed outside of render pass.
+            EndRenderPass();
+        }
+
+        FlushBarriers();
+        vkCmdFillBuffer(m_VkCmdBuffer, dstBuffer, dstOffset, size, data);
+    }
 
     __forceinline void CopyBuffer(VkBuffer            srcBuffer,
                                   VkBuffer            dstBuffer,

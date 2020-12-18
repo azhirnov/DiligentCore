@@ -178,6 +178,13 @@ public:
                                                Uint32                         DstOffset,
                                                Uint32                         Size,
                                                RESOURCE_STATE_TRANSITION_MODE DstBufferTransitionMode) override final;
+    
+    /// Implementation of IDeviceContext::CopyBuffer() in OpenGL backend.
+    virtual void DILIGENT_CALL_TYPE FillBuffer(IBuffer*                       pDstBuffer,
+                                               Uint32                         DstOffset,
+                                               Uint32                         Size,
+                                               Uint32                         Pattern,
+                                               RESOURCE_STATE_TRANSITION_MODE BufferTransitionMode) override final;
 
     /// Implementation of IDeviceContext::MapBuffer() in OpenGL backend.
     virtual void DILIGENT_CALL_TYPE MapBuffer(IBuffer* pBuffer, MAP_TYPE MapType, MAP_FLAGS MapFlags, PVoid& pMappedData) override final;

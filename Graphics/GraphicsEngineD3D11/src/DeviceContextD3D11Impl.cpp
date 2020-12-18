@@ -1032,6 +1032,15 @@ void DeviceContextD3D11Impl::CopyBuffer(IBuffer*                       pSrcBuffe
     m_pd3d11DeviceContext->CopySubresourceRegion(pDstBufferD3D11Impl->m_pd3d11Buffer, 0, DstOffset, 0, 0, pSrcBufferD3D11Impl->m_pd3d11Buffer, 0, &SrcBox);
 }
 
+void DeviceContextD3D11Impl::FillBuffer(IBuffer*                       pDstBuffer,
+                                        Uint32                         DstOffset,
+                                        Uint32                         Size,
+                                        Uint32                         Pattern,
+                                        RESOURCE_STATE_TRANSITION_MODE BufferTransitionMode)
+{
+    UNSUPPORTED("FillBuffer is not supported in Direct3D11");
+}
+
 
 void DeviceContextD3D11Impl::MapBuffer(IBuffer* pBuffer, MAP_TYPE MapType, MAP_FLAGS MapFlags, PVoid& pMappedData)
 {

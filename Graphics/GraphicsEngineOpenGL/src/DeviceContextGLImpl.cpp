@@ -1454,6 +1454,15 @@ void DeviceContextGLImpl::CopyBuffer(IBuffer*                       pSrcBuffer,
     pDstBufferGL->CopyData(m_ContextState, *pSrcBufferGL, SrcOffset, DstOffset, Size);
 }
 
+void DeviceContextGLImpl::FillBuffer(IBuffer*                       pDstBuffer,
+                                     Uint32                         DstOffset,
+                                     Uint32                         Size,
+                                     Uint32                         Pattern,
+                                     RESOURCE_STATE_TRANSITION_MODE BufferTransitionMode)
+{
+    UNSUPPORTED("FillBuffer is not supported in OpenGL");
+}
+
 void DeviceContextGLImpl::MapBuffer(IBuffer* pBuffer, MAP_TYPE MapType, MAP_FLAGS MapFlags, PVoid& pMappedData)
 {
     TDeviceContextBase::MapBuffer(pBuffer, MapType, MapFlags, pMappedData);

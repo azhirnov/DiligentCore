@@ -197,6 +197,13 @@ public:
                                                Uint32                         Size,
                                                RESOURCE_STATE_TRANSITION_MODE DstBufferTransitionMode) override final;
 
+    /// Implementation of IDeviceContext::CopyBuffer() in Vulkan backend.
+    virtual void DILIGENT_CALL_TYPE FillBuffer(IBuffer*                       pDstBuffer,
+                                               Uint32                         DstOffset,
+                                               Uint32                         Size,
+                                               Uint32                         Pattern,
+                                               RESOURCE_STATE_TRANSITION_MODE BufferTransitionMode) override final;
+
     /// Implementation of IDeviceContext::MapBuffer() in Vulkan backend.
     virtual void DILIGENT_CALL_TYPE MapBuffer(IBuffer*  pBuffer,
                                               MAP_TYPE  MapType,
