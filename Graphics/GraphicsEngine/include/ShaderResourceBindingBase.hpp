@@ -91,8 +91,8 @@ protected:
         const auto PipelineType = m_pPSO->GetDesc().PipelineType;
         if (!IsConsistentShaderType(ShaderType, PipelineType))
         {
-            LOG_WARNING_MESSAGE("Unable to find mutable/dynamic variable '", Name, "' in shader stage ", GetShaderTypeLiteralName(ShaderType),
-                                " as the stage is invalid for ", GetPipelineTypeString(m_pPSO->GetDesc().PipelineType), " pipeline '", m_pPSO->GetDesc().Name, "'");
+            //LOG_WARNING_MESSAGE("Unable to find mutable/dynamic variable '", Name, "' in shader stage ", GetShaderTypeLiteralName(ShaderType),
+            //                    " as the stage is invalid for ", GetPipelineTypeString(m_pPSO->GetDesc().PipelineType), " pipeline '", m_pPSO->GetDesc().Name, "'");
             return -1;
         }
 
@@ -100,8 +100,8 @@ protected:
         const auto ResLayoutInd = ResourceLayoutIndex[ShaderInd];
         if (ResLayoutInd < 0)
         {
-            LOG_WARNING_MESSAGE("Unable to find mutable/dynamic variable '", Name, "' in shader stage ", GetShaderTypeLiteralName(ShaderType),
-                                " as the stage is inactive in PSO '", m_pPSO->GetDesc().Name, "'");
+            //LOG_WARNING_MESSAGE("Unable to find mutable/dynamic variable '", Name, "' in shader stage ", GetShaderTypeLiteralName(ShaderType),
+            //                    " as the stage is inactive in PSO '", m_pPSO->GetDesc().Name, "'");
         }
 
         return ResLayoutInd;
