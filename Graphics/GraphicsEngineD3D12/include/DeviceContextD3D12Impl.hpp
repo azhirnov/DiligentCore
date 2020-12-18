@@ -186,7 +186,7 @@ public:
                                                Uint32                         DstOffset,
                                                Uint32                         Size,
                                                RESOURCE_STATE_TRANSITION_MODE DstBufferTransitionMode) override final;
-    
+
     /// Implementation of IDeviceContext::CopyBuffer() in Direct3D12 backend.
     virtual void DILIGENT_CALL_TYPE FillBuffer(IBuffer*                       pDstBuffer,
                                                Uint32                         DstOffset,

@@ -423,7 +423,7 @@ public:
         VERIFY_EXPR(m_VkCmdBuffer != VK_NULL_HANDLE);
         vkCmdBindDescriptorSets(m_VkCmdBuffer, pipelineBindPoint, layout, firstSet, descriptorSetCount, pDescriptorSets, dynamicOffsetCount, pDynamicOffsets);
     }
-    
+
     __forceinline void FillBuffer(VkBuffer     dstBuffer,
                                   VkDeviceSize dstOffset,
                                   VkDeviceSize size,

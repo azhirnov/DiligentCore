@@ -234,6 +234,12 @@ void EngineFactoryVkImpl::CreateDeviceAndContextsVk(const EngineVkCreateInfo& _E
         // clang-format on
 #undef ENABLE_FEATURE
 
+        // enable some features
+        {
+            EnabledFeatures.shaderFloat64                        = PhysicalDeviceFeatures.shaderFloat64;
+            EnabledFeatures.shaderStorageImageWriteWithoutFormat = PhysicalDeviceFeatures.shaderStorageImageWriteWithoutFormat;
+        }
+
         DeviceCreateInfo.pEnabledFeatures = &EnabledFeatures; // NULL or a pointer to a VkPhysicalDeviceFeatures structure that contains
                                                               // boolean indicators of all the features to be enabled.
 

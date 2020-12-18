@@ -109,8 +109,8 @@ void InitPipelineShaderStages(const VulkanUtilities::VulkanLogicalDevice&       
             // We have to strip reflection instructions to fix the follownig validation error:
             //     SPIR-V module not valid: DecorateStringGOOGLE requires one of the following extensions: SPV_GOOGLE_decorate_string
             // Optimizer also performs validation and may catch problems with the byte code.
-            if (!StripReflection(LogicalDevice, SPIRV))
-                LOG_ERROR("Failed to strip reflection information from shader '", pShader->GetDesc().Name, "'. This may indicate a problem with the byte code.");
+            //if (!StripReflection(LogicalDevice, SPIRV))
+            //    LOG_ERROR("Failed to strip reflection information from shader '", pShader->GetDesc().Name, "'. This may indicate a problem with the byte code.");
 
             ShaderModuleCI.codeSize = SPIRV.size() * sizeof(uint32_t);
             ShaderModuleCI.pCode    = SPIRV.data();

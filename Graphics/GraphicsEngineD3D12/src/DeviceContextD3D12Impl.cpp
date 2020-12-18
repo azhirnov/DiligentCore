@@ -1419,10 +1419,10 @@ void DeviceContextD3D12Impl::CopyBuffer(IBuffer*                       pSrcBuffe
 }
 
 void DeviceContextD3D12Impl::FillBuffer(IBuffer*                       pDstBuffer,
-                                     Uint32                         DstOffset,
-                                     Uint32                         Size,
-                                     Uint32                         Pattern,
-                                     RESOURCE_STATE_TRANSITION_MODE BufferTransitionMode)
+                                        Uint32                         DstOffset,
+                                        Uint32                         Size,
+                                        Uint32                         Pattern,
+                                        RESOURCE_STATE_TRANSITION_MODE BufferTransitionMode)
 {
     UNSUPPORTED("FillBuffer is not supported yet");
 }
