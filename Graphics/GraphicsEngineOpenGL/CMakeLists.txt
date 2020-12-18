@@ -302,3 +302,7 @@ if(DILIGENT_INSTALL_CORE)
     install_core_lib(Diligent-GraphicsEngineOpenGL-shared)
     install_core_lib(Diligent-GraphicsEngineOpenGL-static)
 endif()
+
+# create empty cpp file that changed after each build to trigger build of dependent target which must copy new shared libraries
+set(Diligent-GraphicsEngineOpenGL-trigger "${CMAKE_CURRENT_SOURCE_DIR}/src/Diligent-GraphicsEngineOpenGL.trigger.cpp" CACHE INTERNAL "" FORCE)
+add_custom_command(TARGET Diligent-GraphicsEngineOpenGL-shared POST_BUILD COMMAND ${CMAKE_COMMAND} -E touch "${Diligent-GraphicsEngineOpenGL-trigger}")
