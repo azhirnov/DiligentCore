@@ -307,6 +307,17 @@ RenderDeviceD3D12Impl::RenderDeviceD3D12Impl(IReferenceCounters*          pRefCo
             }
         }
 
+        {
+            D3D12_FEATURE_DATA_D3D12_OPTIONS1 d3d12Features1 = {};
+            if (SUCCEEDED(m_pd3d12Device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS1, &d3d12Features1, sizeof(d3d12Features1))))
+            {
+                if (d3d12Features1.WaveOps != FALSE)
+                {
+                    m_DeviceCaps.Features.WaveOp = DEVICE_FEATURE_STATE_ENABLED;
+                }
+            }
+        }
+
 #define CHECK_REQUIRED_FEATURE(Feature, FeatureName)                          \
     do                                                                        \
     {                                                                         \
@@ -326,11 +337,14 @@ RenderDeviceD3D12Impl::RenderDeviceD3D12Impl(IReferenceCounters*          pRefCo
         CHECK_REQUIRED_FEATURE(UniformBuffer8BitAccess,  "8-bit uniform buffer access is");
 
         CHECK_REQUIRED_FEATURE(RayTracing,               "ray tracing is");
+        
+        CHECK_REQUIRED_FEATURE(ShaderClock,              "shader clock is");
+        CHECK_REQUIRED_FEATURE(WaveOp,                   "wave op are");
         // clang-format on
 #undef CHECK_REQUIRED_FEATURE
 
 #if defined(_MSC_VER) && defined(_WIN64)
-        static_assert(sizeof(DeviceFeatures) == 32, "Did you add a new feature to DeviceFeatures? Please handle its satus here.");
+        static_assert(sizeof(DeviceFeatures) == 34, "Did you add a new feature to DeviceFeatures? Please handle its satus here.");
 #endif
 
         auto& TexCaps = m_DeviceCaps.TexCaps;

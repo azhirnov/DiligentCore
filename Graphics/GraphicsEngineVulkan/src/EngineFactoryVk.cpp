@@ -138,14 +138,14 @@ void EngineFactoryVkImpl::CreateDeviceAndContextsVk(const EngineVkCreateInfo& _E
     try
     {
         Uint32 Version = VK_API_VERSION_1_0;
-        if (EngineCI.Features.RayTracing != DEVICE_FEATURE_STATE_DISABLED)
+        if (EngineCI.Features.RayTracing != DEVICE_FEATURE_STATE_DISABLED || EngineCI.Features.WaveOp != DEVICE_FEATURE_STATE_DISABLED)
             Version = VK_API_VERSION_1_2;
 
         auto Instance = VulkanUtilities::VulkanInstance::Create(
             Version,
             EngineCI.EnableValidation,
-            EngineCI.GlobalExtensionCount,
-            EngineCI.ppGlobalExtensionNames,
+            EngineCI.InstanceExtensionCount,
+            EngineCI.ppInstanceExtensionNames,
             reinterpret_cast<VkAllocationCallbacks*>(EngineCI.pVkAllocator));
 
         auto        vkDevice               = Instance->SelectPhysicalDevice(EngineCI.AdapterId);
@@ -279,6 +279,13 @@ void EngineFactoryVkImpl::CreateDeviceAndContextsVk(const EngineVkCreateInfo& _E
         // clang-format on
 
         ENABLE_FEATURE(DeviceExtFeatures.AccelStruct.accelerationStructure != VK_FALSE && DeviceExtFeatures.RayTracingPipeline.rayTracingPipeline != VK_FALSE, RayTracing, "Ray tracing is");
+
+        const auto& ShaderClockFeats = DeviceExtFeatures.ShaderClock;
+        ENABLE_FEATURE(ShaderClockFeats.shaderDeviceClock != VK_FALSE, ShaderClock, "Shader clock is");
+
+        const auto& SubgroupProps         = PhysicalDevice->GetExtProperties().Subgroup;
+        const auto  RequiredSubgroupFeats = VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_VOTE_BIT;
+        ENABLE_FEATURE(Instance->GetVkVersion() >= VK_API_VERSION_1_1 && (SubgroupProps.supportedOperations & RequiredSubgroupFeats) == RequiredSubgroupFeats, WaveOp, "Wave operations are");
 #undef FeatureSupport
 
 
@@ -447,13 +454,30 @@ void EngineFactoryVkImpl::CreateDeviceAndContextsVk(const EngineVkCreateInfo& _E
                 NextExt  = &EnabledExtFeats.BufferDeviceAddress.pNext;
             }
 
+            // Shader clock
+            if (EngineCI.Features.ShaderClock != DEVICE_FEATURE_STATE_DISABLED)
+            {
+                DeviceExtensions.push_back(VK_KHR_SHADER_CLOCK_EXTENSION_NAME);
+                EnabledExtFeats.ShaderClock = DeviceExtFeatures.ShaderClock;
+
+                *NextExt = &EnabledExtFeats.ShaderClock;
+                NextExt  = &EnabledExtFeats.ShaderClock.pNext;
+            }
+
+            if (EngineCI.Features.WaveOp != DEVICE_FEATURE_STATE_DISABLED)
+            {
+                EnabledExtFeats.SubgroupOps = true;
+            }
+
             // make sure that last pNext is null
             *NextExt = nullptr;
         }
 
 #if defined(_MSC_VER) && defined(_WIN64)
-        static_assert(sizeof(DeviceFeatures) == 32, "Did you add a new feature to DeviceFeatures? Please handle its satus here.");
+        static_assert(sizeof(DeviceFeatures) == 34, "Did you add a new feature to DeviceFeatures? Please handle its satus here.");
 #endif
+        for (Uint32 i = 0; i < EngineCI.DeviceExtensionCount; ++i)
+            DeviceExtensions.push_back(EngineCI.ppDeviceExtensionNames[i]);
 
         DeviceCreateInfo.ppEnabledExtensionNames = DeviceExtensions.empty() ? nullptr : DeviceExtensions.data();
         DeviceCreateInfo.enabledExtensionCount   = static_cast<uint32_t>(DeviceExtensions.size());

@@ -47,8 +47,10 @@ public:
         VkPhysicalDeviceRayTracingPipelineFeaturesKHR    RayTracingPipeline  = {};
         bool                                             Spirv14             = false; // Ray tracing requires Vulkan 1.2 or SPIRV 1.4 extension
         bool                                             Spirv15             = false; // DXC shaders with ray tracing requires Vulkan 1.2 with SPIRV 1.5
+        bool                                             SubgroupOps         = false; // Requires Vulkan 1.1
         VkPhysicalDeviceBufferDeviceAddressFeaturesKHR   BufferDeviceAddress = {};
         VkPhysicalDeviceDescriptorIndexingFeaturesEXT    DescriptorIndexing  = {};
+        VkPhysicalDeviceShaderClockFeaturesKHR           ShaderClock         = {};
     };
 
     struct ExtensionProperties
@@ -57,6 +59,7 @@ public:
         VkPhysicalDeviceAccelerationStructurePropertiesKHR AccelStruct        = {};
         VkPhysicalDeviceRayTracingPipelinePropertiesKHR    RayTracingPipeline = {};
         VkPhysicalDeviceDescriptorIndexingPropertiesEXT    DescriptorIndexing = {};
+        VkPhysicalDeviceSubgroupProperties                 Subgroup           = {};
     };
 
 public:

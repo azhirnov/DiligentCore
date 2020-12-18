@@ -1632,6 +1632,12 @@ struct DeviceFeatures
 
     /// Indicates if device supports reading 8-bit types from uniform buffers.
     DEVICE_FEATURE_STATE UniformBuffer8BitAccess          DEFAULT_INITIALIZER(DEVICE_FEATURE_STATE_DISABLED);
+    
+    /// AZ TODO
+    DEVICE_FEATURE_STATE ShaderClock                      DEFAULT_INITIALIZER(DEVICE_FEATURE_STATE_DISABLED);
+    
+    /// AZ TODO
+    DEVICE_FEATURE_STATE WaveOp                           DEFAULT_INITIALIZER(DEVICE_FEATURE_STATE_DISABLED);
 
 
 #if DILIGENT_CPP_INTERFACE
@@ -1669,10 +1675,12 @@ struct DeviceFeatures
         ShaderInputOutput16               {State},
         ShaderInt8                        {State},
         ResourceBuffer8BitAccess          {State},
-        UniformBuffer8BitAccess           {State}
+        UniformBuffer8BitAccess           {State},
+        ShaderClock                       {State},
+        WaveOp                            {State}
     {
 #   if defined(_MSC_VER) && defined(_WIN64)
-        static_assert(sizeof(*this) == 32, "Did you add a new feature to DeviceFeatures? Please handle its status above.");
+        static_assert(sizeof(*this) == 34, "Did you add a new feature to DeviceFeatures? Please handle its status above.");
 #   endif
     }
 #endif
@@ -2178,11 +2186,17 @@ struct EngineVkCreateInfo DILIGENT_DERIVE(EngineCreateInfo)
     /// Enable Vulkan validation layers.
     bool               EnableValidation         DEFAULT_INITIALIZER(false);
         
-    /// Number of global Vulkan extensions
-    Uint32             GlobalExtensionCount     DEFAULT_INITIALIZER(0);
+    /// Number of Vulkan instance extensions
+    Uint32             InstanceExtensionCount   DEFAULT_INITIALIZER(0);
 
-    /// List of global Vulkan extensions to enable.
-    const char* const* ppGlobalExtensionNames   DEFAULT_INITIALIZER(nullptr);
+    /// List of Vulkan instance extensions to enable.
+    const char* const* ppInstanceExtensionNames DEFAULT_INITIALIZER(nullptr);
+    
+    /// Number of Vulkan device extensions
+    Uint32             DeviceExtensionCount     DEFAULT_INITIALIZER(0);
+
+    /// List of Vulkan device extensions to enable.
+    const char* const* ppDeviceExtensionNames   DEFAULT_INITIALIZER(nullptr);
 
     /// Allocator used as pAllocator parameter in callse to Vulkan Create* functions
     void* pVkAllocator                          DEFAULT_INITIALIZER(nullptr);

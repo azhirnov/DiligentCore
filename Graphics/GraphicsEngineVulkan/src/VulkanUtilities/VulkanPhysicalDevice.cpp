@@ -180,6 +180,24 @@ VulkanPhysicalDevice::VulkanPhysicalDevice(VkPhysicalDevice      vkDevice,
             m_ExtFeatures.Spirv15 = true;
         }
 
+        // For shader profiling.
+        if (IsExtensionSupported(VK_KHR_SHADER_CLOCK_EXTENSION_NAME))
+        {
+            *NextFeat = &m_ExtFeatures.ShaderClock;
+            NextFeat  = &m_ExtFeatures.ShaderClock.pNext;
+
+            m_ExtFeatures.ShaderClock.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_CLOCK_FEATURES_KHR;
+        }
+
+        // Subgroup feature requires Vulkan 1.1 core.
+        if (Instance.GetVkVersion() >= VK_API_VERSION_1_1)
+        {
+            *NextProp = &m_ExtProperties.Subgroup;
+            NextProp  = &m_ExtProperties.Subgroup.pNext;
+
+            m_ExtProperties.Subgroup.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES;
+        }
+
         // make sure that last pNext is null
         *NextFeat = nullptr;
         *NextProp = nullptr;
