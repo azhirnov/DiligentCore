@@ -37,8 +37,6 @@
 namespace Diligent
 {
 
-D3D12_DESCRIPTOR_HEAP_TYPE dbgHeapTypeFromRangeType(D3D12_DESCRIPTOR_RANGE_TYPE RangeType);
-
 class RootParameter
 {
 public:
@@ -490,6 +488,10 @@ public:
                               const char*                     SamplerSuffix,
                               const D3DShaderResourceAttribs& ShaderResAttribs);
 
+    // Allocates root signature slot for the given resource.
+    // For graphics and compute pipelines, BindPoint is the same as the original bind point.
+    // For ray-tracing pipeline, BindPoint will be overriden. Bind points are then
+    // remapped by PSO constructor.
     void AllocateResourceSlot(SHADER_TYPE                     ShaderType,
                               PIPELINE_TYPE                   PipelineType,
                               const D3DShaderResourceAttribs& ShaderResAttribs,
@@ -508,7 +510,6 @@ public:
         return m_RootSig.GetHash();
     }
 
-    // Note: sizeof(m_ImmutableSamplers) == 56 (MS compiler, release x64)
     struct ImmutableSamplerAttribs
     {
         ImmutableSamplerDesc    SamplerDesc;
@@ -536,7 +537,9 @@ private:
 
     RootSignature& m_RootSig;
 
-    std::array<Uint16, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER + 1> m_NumResources = {};
+    // Resource counters for every descriptor range type used to assign bind points
+    // for ray-tracing shaders.
+    std::array<Uint32, D3D12_DESCRIPTOR_RANGE_TYPE_SAMPLER + 1> m_NumResources = {};
 
     std::vector<ImmutableSamplerAttribs, STDAllocatorRawMem<ImmutableSamplerAttribs>> m_ImmutableSamplers;
 };
