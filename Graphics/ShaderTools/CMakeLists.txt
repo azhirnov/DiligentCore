@@ -117,7 +117,7 @@ endif()
 if(ENABLE_SPIRV)
     target_link_libraries(Diligent-ShaderTools 
     PRIVATE
-        spirv-cross-core
+        spirv-reflect
     )
 
     if (NOT ${DILIGENT_NO_GLSLANG})

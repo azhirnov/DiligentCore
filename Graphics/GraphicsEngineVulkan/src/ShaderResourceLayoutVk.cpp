@@ -744,11 +744,6 @@ void ShaderResourceLayoutVk::Initialize(IRenderDevice*                    pRende
                     VERIFY_EXPR(SmplImg.Type == SPIRVShaderResourceAttribs::ResourceType::SampledImage || SmplImg.Type == SPIRVShaderResourceAttribs::ResourceType::UniformTexelBuffer);
                     AddResource(static_cast<Uint32>(s), Resources, SmplImg, SPIRV);
                 },
-                [&](const SPIRVShaderResourceAttribs& AC, Uint32)
-                {
-                    VERIFY_EXPR(AC.Type == SPIRVShaderResourceAttribs::ResourceType::AtomicCounter);
-                    AddResource(static_cast<Uint32>(s), Resources, AC, SPIRV);
-                },
                 [&](const SPIRVShaderResourceAttribs& SepSmpl, Uint32)
                 {
                     VERIFY_EXPR(SepSmpl.Type == SPIRVShaderResourceAttribs::ResourceType::SeparateSampler);
