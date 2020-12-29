@@ -185,13 +185,13 @@ static_assert(sizeof(SPIRVShaderStageInputAttribs) % sizeof(void*) == 0, "Size o
 class SPIRVShaderResources
 {
 public:
-    SPIRVShaderResources(IMemoryAllocator&     Allocator,
-                         IRenderDevice*        pRenderDevice,
-                         std::vector<uint32_t> spirv_binary,
-                         const ShaderDesc&     shaderDesc,
-                         const char*           CombinedSamplerSuffix,
-                         bool                  LoadShaderStageInputs,
-                         std::string&          EntryPoint);
+    SPIRVShaderResources(IMemoryAllocator&            Allocator,
+                         IRenderDevice*               pRenderDevice,
+                         const std::vector<uint32_t>& spirv_binary,
+                         const ShaderDesc&            shaderDesc,
+                         const char*                  CombinedSamplerSuffix,
+                         bool                         LoadShaderStageInputs,
+                         std::string&                 EntryPoint);
 
     // clang-format off
     SPIRVShaderResources             (const SPIRVShaderResources&)  = delete;

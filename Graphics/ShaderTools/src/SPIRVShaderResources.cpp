@@ -36,7 +36,8 @@
 
 namespace Diligent
 {
-
+namespace
+{
 template <typename Type>
 Type GetResourceArraySize(const SpvReflectDescriptorBinding& Binding)
 {
@@ -88,6 +89,82 @@ static bool IsMultisample(const SpvReflectDescriptorBinding& Binding)
         return RESOURCE_DIM_UNDEFINED;
     }
 }
+
+
+static spv::ExecutionModel ShaderTypeToExecutionModel(SHADER_TYPE ShaderType)
+{
+    static_assert(SHADER_TYPE_LAST == SHADER_TYPE_CALLABLE, "Please handle the new shader type in the switch below");
+    switch (ShaderType)
+    {
+        // clang-format off
+        case SHADER_TYPE_VERTEX:           return spv::ExecutionModelVertex;
+        case SHADER_TYPE_HULL:             return spv::ExecutionModelTessellationControl;
+        case SHADER_TYPE_DOMAIN:           return spv::ExecutionModelTessellationEvaluation;
+        case SHADER_TYPE_GEOMETRY:         return spv::ExecutionModelGeometry;
+        case SHADER_TYPE_PIXEL:            return spv::ExecutionModelFragment;
+        case SHADER_TYPE_COMPUTE:          return spv::ExecutionModelGLCompute;
+        case SHADER_TYPE_AMPLIFICATION:    return spv::ExecutionModelTaskNV;
+        case SHADER_TYPE_MESH:             return spv::ExecutionModelMeshNV;
+        case SHADER_TYPE_RAY_GEN:          return spv::ExecutionModelRayGenerationKHR;
+        case SHADER_TYPE_RAY_MISS:         return spv::ExecutionModelMissKHR;
+        case SHADER_TYPE_RAY_CLOSEST_HIT:  return spv::ExecutionModelClosestHitKHR;
+        case SHADER_TYPE_RAY_ANY_HIT:      return spv::ExecutionModelAnyHitKHR;
+        case SHADER_TYPE_RAY_INTERSECTION: return spv::ExecutionModelIntersectionKHR;
+        case SHADER_TYPE_CALLABLE:         return spv::ExecutionModelCallableKHR;
+        // clang-format on
+        default:
+            UNEXPECTED("Unexpected shader type");
+            return spv::ExecutionModelVertex;
+    }
+}
+
+static const char* GetResourceName(const SpvReflectDescriptorBinding* binding, bool useNameInsteadOfTypename)
+{
+    if (binding->type_description != nullptr && binding->type_description->type_name != nullptr)
+    {
+        if (binding->name == nullptr || binding->name[0] == 0)
+            useNameInsteadOfTypename = false;
+
+        switch (binding->descriptor_type)
+        {
+            case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+            case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+            case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+            case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+                return useNameInsteadOfTypename ? binding->name : binding->type_description->type_name;
+        }
+    }
+
+    return binding->name;
+}
+
+struct SpvReflectModule
+{
+    SpvReflectShaderModule Module = {};
+    SpvReflectResult       result = SPV_REFLECT_RESULT_SUCCESS;
+
+    explicit SpvReflectModule(const std::vector<uint32_t>& spirv_binary)
+    {
+        result = spvReflectCreateShaderModule(spirv_binary.size() * sizeof(spirv_binary[0]), spirv_binary.data(), &Module);
+    }
+
+    ~SpvReflectModule()
+    {
+        spvReflectDestroyShaderModule(&Module);
+    }
+
+    explicit operator bool() const
+    {
+        return result == SPV_REFLECT_RESULT_SUCCESS;
+    }
+
+    SpvReflectShaderModule* operator->()
+    {
+        return &Module;
+    }
+};
+
+} // namespace
 
 SPIRVShaderResourceAttribs::SPIRVShaderResourceAttribs(const SpvReflectDescriptorBinding& Binding,
                                                        const char*                        _Name,
@@ -163,77 +240,29 @@ SHADER_RESOURCE_TYPE SPIRVShaderResourceAttribs::GetShaderResourceType(ResourceT
     }
 }
 
-
-static spv::ExecutionModel ShaderTypeToExecutionModel(SHADER_TYPE ShaderType)
-{
-    static_assert(SHADER_TYPE_LAST == SHADER_TYPE_CALLABLE, "Please handle the new shader type in the switch below");
-    switch (ShaderType)
-    {
-        // clang-format off
-        case SHADER_TYPE_VERTEX:           return spv::ExecutionModelVertex;
-        case SHADER_TYPE_HULL:             return spv::ExecutionModelTessellationControl;
-        case SHADER_TYPE_DOMAIN:           return spv::ExecutionModelTessellationEvaluation;
-        case SHADER_TYPE_GEOMETRY:         return spv::ExecutionModelGeometry;
-        case SHADER_TYPE_PIXEL:            return spv::ExecutionModelFragment;
-        case SHADER_TYPE_COMPUTE:          return spv::ExecutionModelGLCompute;
-        case SHADER_TYPE_AMPLIFICATION:    return spv::ExecutionModelTaskNV;
-        case SHADER_TYPE_MESH:             return spv::ExecutionModelMeshNV;
-        case SHADER_TYPE_RAY_GEN:          return spv::ExecutionModelRayGenerationKHR;
-        case SHADER_TYPE_RAY_MISS:         return spv::ExecutionModelMissKHR;
-        case SHADER_TYPE_RAY_CLOSEST_HIT:  return spv::ExecutionModelClosestHitKHR;
-        case SHADER_TYPE_RAY_ANY_HIT:      return spv::ExecutionModelAnyHitKHR;
-        case SHADER_TYPE_RAY_INTERSECTION: return spv::ExecutionModelIntersectionKHR;
-        case SHADER_TYPE_CALLABLE:         return spv::ExecutionModelCallableKHR;
-        // clang-format on
-        default:
-            UNEXPECTED("Unexpected shader type");
-            return spv::ExecutionModelVertex;
-    }
-}
-
-static const char* GetResourceName(const SpvReflectDescriptorBinding* binding, bool isHLSL)
-{
-    if (binding->type_description != nullptr && binding->type_description->type_name != nullptr)
-    {
-        if (binding->name == nullptr || binding->name[0] == 0)
-            isHLSL = false;
-
-        switch (binding->descriptor_type)
-        {
-            case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-            case SPV_REFLECT_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
-                return isHLSL ? binding->name : binding->type_description->type_name;
-
-            case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-            case SPV_REFLECT_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
-                return isHLSL ? binding->name : binding->type_description->type_name;
-        }
-    }
-
-    return binding->name;
-}
-
-SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
-                                           IRenderDevice*        pRenderDevice,
-                                           std::vector<uint32_t> spirv_binary,
-                                           const ShaderDesc&     shaderDesc,
-                                           const char*           CombinedSamplerSuffix,
-                                           bool                  LoadShaderStageInputs,
-                                           std::string&          EntryPoint) :
+SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&            Allocator,
+                                           IRenderDevice*               pRenderDevice,
+                                           const std::vector<uint32_t>& spirv_binary,
+                                           const ShaderDesc&            shaderDesc,
+                                           const char*                  CombinedSamplerSuffix,
+                                           bool                         LoadShaderStageInputs,
+                                           std::string&                 EntryPoint) :
     m_ShaderType{shaderDesc.ShaderType}
 {
-    SpvReflectShaderModule Module = {};
-    if (spvReflectCreateShaderModule(spirv_binary.size() * sizeof(spirv_binary[0]), spirv_binary.data(), &Module) != SPV_REFLECT_RESULT_SUCCESS)
-        return;
+    SpvReflectModule Module{spirv_binary};
+    if (!Module)
+    {
+        LOG_ERROR_AND_THROW("Failed to parse SPIRV binary for shader '", shaderDesc.Name, "'");
+    }
 
     spv::ExecutionModel   ExecutionModel = ShaderTypeToExecutionModel(shaderDesc.ShaderType);
     SpvReflectEntryPoint* pReflection    = nullptr;
 
-    m_IsHLSLSource = (Module.source_language == SpvSourceLanguage::SpvSourceLanguageHLSL);
+    m_IsHLSLSource = (Module->source_language == SpvSourceLanguage::SpvSourceLanguageHLSL);
 
-    for (uint32_t i = 0; i < Module.entry_point_count; ++i)
+    for (uint32_t i = 0; i < Module->entry_point_count; ++i)
     {
-        if (Module.entry_points[i].spirv_execution_model == ExecutionModel)
+        if (Module->entry_points[i].spirv_execution_model == ExecutionModel)
         {
             if (!EntryPoint.empty())
             {
@@ -241,8 +270,8 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
             }
             else
             {
-                EntryPoint  = Module.entry_points[i].name;
-                pReflection = &Module.entry_points[i];
+                pReflection = &Module->entry_points[i];
+                EntryPoint  = pReflection->name;
             }
         }
     }
@@ -301,7 +330,7 @@ SPIRVShaderResources::SPIRVShaderResources(IMemoryAllocator&     Allocator,
 
     Uint32 NumShaderStageInputs = 0;
 
-    if (!m_IsHLSLSource || Module.interface_variable_count == 0)
+    if (!m_IsHLSLSource || pReflection->input_variable_count == 0)
         LoadShaderStageInputs = false;
 
     if (LoadShaderStageInputs)
