@@ -1,5 +1,5 @@
 /*
- *  Copyright 2019-2020 Diligent Graphics LLC
+ *  Copyright 2019-2021 Diligent Graphics LLC
  *  Copyright 2015-2019 Egor Yusov
  *  
  *  Licensed under the Apache License, Version 2.0 (the "License");
@@ -109,8 +109,8 @@ void InitPipelineShaderStages(const VulkanUtilities::VulkanLogicalDevice&       
             // We have to strip reflection instructions to fix the follownig validation error:
             //     SPIR-V module not valid: DecorateStringGOOGLE requires one of the following extensions: SPV_GOOGLE_decorate_string
             // Optimizer also performs validation and may catch problems with the byte code.
-            //if (!StripReflection(LogicalDevice, SPIRV))
-            //    LOG_ERROR("Failed to strip reflection information from shader '", pShader->GetDesc().Name, "'. This may indicate a problem with the byte code.");
+            if (!StripReflection(LogicalDevice, SPIRV))
+                LOG_ERROR("Failed to strip reflection information from shader '", pShader->GetDesc().Name, "'. This may indicate a problem with the byte code.");
 
             ShaderModuleCI.codeSize = SPIRV.size() * sizeof(uint32_t);
             ShaderModuleCI.pCode    = SPIRV.data();
@@ -898,6 +898,7 @@ void PipelineStateVkImpl::CommitAndTransitionShaderResources(IShaderResourceBind
 #endif
 
     auto* pResBindingVkImpl = ValidatedCast<ShaderResourceBindingVkImpl>(pShaderResourceBinding);
+    auto& ResourceCache     = pResBindingVkImpl->GetResourceCache();
 
 #ifdef DILIGENT_DEVELOPMENT
     {
@@ -909,18 +910,17 @@ void PipelineStateVkImpl::CommitAndTransitionShaderResources(IShaderResourceBind
         }
     }
 
-    if (m_HasStaticResources && !pResBindingVkImpl->StaticResourcesInitialized())
+    if (CommitResources)
     {
-        LOG_ERROR_MESSAGE("Static resources have not been initialized in the shader resource binding object being committed for PSO '", m_Desc.Name, "'. Please call IShaderResourceBinding::InitializeStaticResources().");
-    }
-#endif
+        if (m_HasStaticResources && !pResBindingVkImpl->StaticResourcesInitialized())
+        {
+            LOG_ERROR_MESSAGE("Static resources have not been initialized in the shader resource binding object being committed for PSO '", m_Desc.Name, "'. Please call IShaderResourceBinding::InitializeStaticResources().");
+        }
 
-    auto& ResourceCache = pResBindingVkImpl->GetResourceCache();
-
-#ifdef DILIGENT_DEVELOPMENT
-    for (Uint32 s = 0; s < GetNumShaderStages(); ++s)
-    {
-        m_ShaderResourceLayouts[s].dvpVerifyBindings(ResourceCache);
+        for (Uint32 s = 0; s < GetNumShaderStages(); ++s)
+        {
+            m_ShaderResourceLayouts[s].dvpVerifyBindings(ResourceCache);
+        }
     }
 #endif
 #ifdef DILIGENT_DEBUG
