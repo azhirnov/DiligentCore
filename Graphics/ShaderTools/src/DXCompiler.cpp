@@ -238,9 +238,9 @@ private:
 } // namespace
 
 
-IDXCompiler* CreateDXCompiler(DXCompilerTarget Target, const char* pLibraryName)
+std::unique_ptr<IDXCompiler> CreateDXCompiler(DXCompilerTarget Target, const char* pLibraryName)
 {
-    return new DXCompilerImpl{Target, pLibraryName};
+    return std::unique_ptr<IDXCompiler>{new DXCompilerImpl{Target, pLibraryName}};
 }
 
 bool DXCompilerImpl::Compile(const CompileAttribs& Attribs)
@@ -719,8 +719,8 @@ void DXCompilerImpl::Compile(const ShaderCreateInfo& ShaderCI,
             DxilArgs.push_back(L"-fspv-extension=SPV_GOOGLE_hlsl_functionality1");
             DxilArgs.push_back(L"-fspv-extension=SPV_GOOGLE_user_type");
 
-            DxilArgs.push_back(L"-fspv-extension=SPV_NV_ray_tracing"); // TODO: should be SPV_KHR_ray_tracing
-            //DxilArgs.push_back(L"-fspv-target-env=vulkan1.2"); // required for SPV_KHR_ray_tracing
+            DxilArgs.push_back(L"-fspv-extension=SPV_KHR_ray_tracing");
+            DxilArgs.push_back(L"-fspv-target-env=vulkan1.2"); // required for SPV_KHR_ray_tracing
         }
     }
     else

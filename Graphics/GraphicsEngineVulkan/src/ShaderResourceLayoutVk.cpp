@@ -44,6 +44,14 @@
 namespace Diligent
 {
 
+static constexpr auto RAY_TRACING_SHADER_TYPES =
+    SHADER_TYPE_RAY_GEN |
+    SHADER_TYPE_RAY_MISS |
+    SHADER_TYPE_RAY_CLOSEST_HIT |
+    SHADER_TYPE_RAY_ANY_HIT |
+    SHADER_TYPE_RAY_INTERSECTION |
+    SHADER_TYPE_CALLABLE;
+
 static Int32 FindImmutableSampler(SHADER_TYPE                       ShaderType,
                                   const PipelineResourceLayoutDesc& ResourceLayoutDesc,
                                   const SPIRVShaderResourceAttribs& Attribs,
@@ -95,8 +103,8 @@ static SHADER_RESOURCE_VARIABLE_TYPE FindShaderVariableType(SHADER_TYPE         
 }
 
 
-ShaderResourceLayoutVk::ShaderStageInfo::ShaderStageInfo(SHADER_TYPE Stage, const ShaderVkImpl* pShader) :
-    Type{Stage},
+ShaderResourceLayoutVk::ShaderStageInfo::ShaderStageInfo(const ShaderVkImpl* pShader) :
+    Type{pShader->GetDesc().ShaderType},
     Shaders{pShader},
     SPIRVs{pShader->GetSPIRV()}
 {
@@ -104,6 +112,22 @@ ShaderResourceLayoutVk::ShaderStageInfo::ShaderStageInfo(SHADER_TYPE Stage, cons
 
 void ShaderResourceLayoutVk::ShaderStageInfo::Append(const ShaderVkImpl* pShader)
 {
+    VERIFY_EXPR(pShader != nullptr);
+    VERIFY(std::find(Shaders.begin(), Shaders.end(), pShader) == Shaders.end(),
+           "Shader '", pShader->GetDesc().Name, "' already exists in the stage. Shaders must be deduplicated.");
+
+    const auto NewShaderType = pShader->GetDesc().ShaderType;
+    if (Type == SHADER_TYPE_UNKNOWN)
+    {
+        VERIFY_EXPR(Shaders.empty() && SPIRVs.empty());
+        Type = NewShaderType;
+    }
+    else
+    {
+        VERIFY(Type == NewShaderType, "The type (", GetShaderTypeLiteralName(NewShaderType),
+               ") of shader '", pShader->GetDesc().Name, "' being added to the stage is incosistent with the stage type (",
+               GetShaderTypeLiteralName(Type), ").");
+    }
     Shaders.push_back(pShader);
     SPIRVs.push_back(pShader->GetSPIRV());
 }
@@ -143,7 +167,7 @@ StringPool ShaderResourceLayoutVk::AllocateMemory(const std::vector<const Shader
     // Construct shader or shader group name
     const auto ShaderName = GetShaderGroupName(Shaders);
 
-    size_t StringPoolSize = ShaderName.length() + 1;
+    size_t StringPoolSize = StringPool::GetRequiredReserveSize(ShaderName);
 
     // Count the number of resources to allocate all needed memory
     for (size_t s = 0; s < Shaders.size(); ++s)
@@ -159,10 +183,10 @@ StringPool ShaderResourceLayoutVk::AllocateMemory(const std::vector<const Shader
                 auto VarType = FindShaderVariableType(m_ShaderType, ResAttribs, ResourceLayoutDesc, CombinedSamplerSuffix);
                 if (IsAllowedType(VarType, AllowedTypeBits))
                 {
-                    bool IsUniqueName = UniqueNames.emplace(HashMapStringKey{ResAttribs.Name}, Uint32{InvalidResourceIndex}).second;
-                    if (IsUniqueName)
+                    bool IsNewResource = UniqueNames.emplace(HashMapStringKey{ResAttribs.Name}, Uint32{InvalidResourceIndex}).second;
+                    if (IsNewResource)
                     {
-                        StringPoolSize += strlen(ResAttribs.Name) + 1;
+                        StringPoolSize += StringPool::GetRequiredReserveSize(ResAttribs.Name);
 
                         // For immutable separate samplers we still allocate VkResource instances, but they are never exposed to the app
 
@@ -185,6 +209,8 @@ StringPool ShaderResourceLayoutVk::AllocateMemory(const std::vector<const Shader
     m_NumImmutableSamplers = 0;
     if (AllocateImmutableSamplers)
     {
+        // Reserve space for all immutable samplers that may potentially be used in this
+        // shader stage. Note that not all samplers may actually be used/initialized.
         for (Uint32 s = 0; s < ResourceLayoutDesc.NumImmutableSamplers; ++s)
         {
             const auto& ImtblSamDesc = ResourceLayoutDesc.ImmutableSamplers[s];
@@ -249,32 +275,63 @@ static Uint32 FindAssignedSampler(const ShaderResourceLayoutVk&     Layout,
         }
         if (SamplerInd == CurrResourceCount)
         {
-            LOG_ERROR("Unable to find separate sampler '", SepSampler.Name, "' assigned to separate image '", SepImg.Name, "' in the list of already created resources. This seems to be a bug.");
+            LOG_ERROR("Unable to find separate sampler '", SepSampler.Name, "' assigned to separate image '",
+                      SepImg.Name, "' in the list of already created resources. This seems to be a bug.");
             SamplerInd = VkResource::InvalidSamplerInd;
         }
     }
     return SamplerInd;
 }
 
+static void VerifyResourceMerge(const ShaderResourceLayoutVk::VkResource& ExistingRes,
+                                const SPIRVShaderResourceAttribs&         NewResAttribs,
+                                SHADER_RESOURCE_VARIABLE_TYPE             VarType)
+{
+    VERIFY(ExistingRes.VariableType == VarType,
+           "The type of variable '", NewResAttribs.Name, "' does not match the type determined for previous shaders. This appears to be a bug.");
+
+    DEV_CHECK_ERR(ExistingRes.Type == NewResAttribs.Type,
+                  "Shader variable '", NewResAttribs.Name,
+                  "' exists in multiple shaders from the same shader stage, but its type is not consistent between "
+                  "shaders. All variables with the same name from the same shader stage must have the same type.");
+
+    DEV_CHECK_ERR(ExistingRes.ResourceDim == NewResAttribs.ResourceDim,
+                  "Shader variable '", NewResAttribs.Name,
+                  "' exists in multiple shaders from the same shader stage, but its resource dimension is not consistent between "
+                  "shaders. All variables with the same name from the same shader stage must have the same resource dimension.");
+
+    DEV_CHECK_ERR(ExistingRes.ArraySize == NewResAttribs.ArraySize,
+                  "Shader variable '", NewResAttribs.Name,
+                  "' exists in multiple shaders from the same shader stage, but its array size is not consistent between "
+                  "shaders. All variables with the same name from the same shader stage must have the same array size.");
+
+    DEV_CHECK_ERR(ExistingRes.IsMS == NewResAttribs.IsMS,
+                  "Shader variable '", NewResAttribs.Name,
+                  "' exists in multiple shaders from the same shader stage, but its multisample flag is not consistent between "
+                  "shaders. All variables with the same name from the same shader stage must either be multisample or non-multisample.");
+}
 
 void ShaderResourceLayoutVk::InitializeStaticResourceLayout(const std::vector<const ShaderVkImpl*>& Shaders,
                                                             IMemoryAllocator&                       LayoutDataAllocator,
                                                             const PipelineResourceLayoutDesc&       ResourceLayoutDesc,
                                                             ShaderResourceCacheVk&                  StaticResourceCache)
 {
-    const auto AllowedVarType = SHADER_RESOURCE_VARIABLE_TYPE_STATIC;
+    const auto   AllowedVarType  = SHADER_RESOURCE_VARIABLE_TYPE_STATIC;
+    const Uint32 AllowedTypeBits = GetAllowedTypeBits(&AllowedVarType, 1);
+
+    // A mapping from the resource name to its index in m_ResourceBuffer that is used
+    // to de-duplicate shader resources.
+    ResourceNameToIndex_t ResourceNameToIndex;
+
     // We do not need immutable samplers in static shader resource layout as they
     // are relevant only when the main layout is initialized
-    ResourceNameToIndex_t ResourceNameToIndex;
-    constexpr bool        AllocateImmutableSamplers = false;
+    constexpr bool AllocateImmutableSamplers = false;
 
     auto stringPool = AllocateMemory(Shaders, LayoutDataAllocator, ResourceLayoutDesc, &AllowedVarType, 1, ResourceNameToIndex, AllocateImmutableSamplers);
 
     std::array<Uint32, SHADER_RESOURCE_VARIABLE_TYPE_NUM_TYPES> CurrResInd = {};
 
-    Uint32       StaticResCacheSize = 0;
-    const Uint32 AllowedTypeBits    = GetAllowedTypeBits(&AllowedVarType, 1);
-
+    Uint32 StaticResCacheSize = 0;
     for (const auto* pShader : Shaders)
     {
         const auto& Resources             = *pShader->GetShaderResources();
@@ -297,7 +354,8 @@ void ShaderResourceLayoutVk::InitializeStaticResourceLayout(const std::vector<co
                     {
                         // Only search for the immutable sampler for combined image samplers and separate samplers
                         SrcImmutableSamplerInd = FindImmutableSampler(m_ShaderType, ResourceLayoutDesc, Attribs, CombinedSamplerSuffix);
-                        // For immutable separate samplers we allocate VkResource instances, but they are never exposed to the app
+                        // NB: for immutable separate samplers we still allocate VkResource instances to be compliant with the main
+                        //     layout, but they are never initialized or exposed to the app.
                     }
 
                     Uint32 Binding       = Uint32{Attribs.Type};
@@ -319,29 +377,19 @@ void ShaderResourceLayoutVk::InitializeStaticResourceLayout(const std::vector<co
                         {
                             *this,
                             stringPool.CopyString(Attribs.Name),
-                            Attribs.ArraySize,
-                            Attribs.Type,
-                            Attribs.GetResourceDimension(),
-                            Attribs.IsMultisample(),
+                            Attribs,
                             VarType,
                             Binding,
                             DescriptorSet,
                             CacheOffset,
                             SamplerInd,
-                            SrcImmutableSamplerInd >= 0,
-                            Attribs.BufferStaticSize,
-                            Attribs.BufferStride //
+                            SrcImmutableSamplerInd >= 0 //
                         };
                 }
                 else
                 {
-                    // merge with existing
-                    auto& ExistingRes = GetResource(VarType, ResIter->second);
-                    VERIFY_EXPR(ExistingRes.VariableType == VarType);
-                    VERIFY_EXPR(ExistingRes.Type == Attribs.Type);
-                    VERIFY_EXPR(ExistingRes.ResourceDim == Attribs.ResourceDim);
-                    VERIFY_EXPR(ExistingRes.IsMS == Attribs.IsMS);
-                    VERIFY_EXPR(ExistingRes.ArraySize == Attribs.ArraySize);
+                    // Merge with existing
+                    VerifyResourceMerge(GetResource(VarType, ResIter->second), Attribs, VarType);
                 }
             } //
         );
@@ -516,11 +564,8 @@ void ShaderResourceLayoutVk::Initialize(IRenderDevice*                    pRende
     dvpVerifyResourceLayoutDesc(ShaderStages, ResourceLayoutDesc, VerifyVariables, VerifyImmutableSamplers);
 #endif
 
+    // Mappings from resource name to its index, for every shader stage
     std::array<ResourceNameToIndex_t, MAX_SHADERS_IN_PIPELINE> ResourceNameToIndexArray;
-
-    const SHADER_RESOURCE_VARIABLE_TYPE* AllowedVarTypes = nullptr;
-    const Uint32                         NumAllowedTypes = 0;
-    const Uint32                         AllowedTypeBits = GetAllowedTypeBits(AllowedVarTypes, NumAllowedTypes);
 
     constexpr bool AllocateImmutableSamplers = true;
 
@@ -530,31 +575,33 @@ void ShaderResourceLayoutVk::Initialize(IRenderDevice*                    pRende
     {
         stringPools.emplace_back(
             Layouts[s].AllocateMemory(ShaderStages[s].Shaders, LayoutDataAllocator, ResourceLayoutDesc,
-                                      AllowedVarTypes, NumAllowedTypes, ResourceNameToIndexArray[s],
-                                      AllocateImmutableSamplers));
+                                      nullptr, 0, ResourceNameToIndexArray[s], AllocateImmutableSamplers));
     }
 
-    //VERIFY_EXPR(NumShaders <= MAX_SHADERS_IN_PIPELINE);
-    std::array<std::array<Uint32, SHADER_RESOURCE_VARIABLE_TYPE_NUM_TYPES>, MAX_SHADERS_IN_PIPELINE> CurrResInd              = {};
-    std::array<Uint32, MAX_SHADERS_IN_PIPELINE>                                                      CurrImmutableSamplerInd = {};
+    // Current resource index, for every variable type in every shader stage
+    std::array<std::array<Uint32, SHADER_RESOURCE_VARIABLE_TYPE_NUM_TYPES>, MAX_SHADERS_IN_PIPELINE> CurrResInd = {};
+    // Current immutable sampler index, for every shader stage
+    std::array<Uint32, MAX_SHADERS_IN_PIPELINE> CurrImmutableSamplerInd = {};
+
 #ifdef DILIGENT_DEBUG
     std::unordered_map<Uint32, std::pair<Uint32, Uint32>> dbgBindings_CacheOffsets;
 #endif
 
-    auto AddResource = [&](const Uint32                      ShaderInd,
-                           ShaderResourceLayoutVk&           ResLayout,
+    auto AddResource = [&](const Uint32                      ShaderStageInd,
                            const SPIRVShaderResources&       Resources,
                            const SPIRVShaderResourceAttribs& Attribs,
-                           ResourceNameToIndex_t&            ResourceNameToIndex,
                            std::vector<uint32_t>&            SPIRV) //
     {
-        const auto                          ShaderType = Resources.GetShaderType();
-        const SHADER_RESOURCE_VARIABLE_TYPE VarType    = FindShaderVariableType(ShaderType, Attribs, ResourceLayoutDesc, Resources.GetCombinedSamplerSuffix());
-        if (!IsAllowedType(VarType, AllowedTypeBits))
-            return;
+        auto& ResourceNameToIndex = ResourceNameToIndexArray[ShaderStageInd];
 
         auto ResIter = ResourceNameToIndex.find(HashMapStringKey{Attribs.Name});
-        VERIFY_EXPR(ResIter != ResourceNameToIndex.end());
+        VERIFY(ResIter != ResourceNameToIndex.end(), "Resource '", Attribs.Name,
+               "' is not found in ResourceNameToIndex map. This is a bug as the resource must have been processed by AllocateMemory and added to the map.");
+
+        const auto ShaderType = Resources.GetShaderType();
+        const auto VarType    = FindShaderVariableType(ShaderType, Attribs, ResourceLayoutDesc, Resources.GetCombinedSamplerSuffix());
+
+        auto& ResLayout = Layouts[ShaderStageInd];
 
         const VkResource* pResource = nullptr;
         if (ResIter->second == InvalidResourceIndex)
@@ -569,7 +616,7 @@ void ShaderResourceLayoutVk::Initialize(IRenderDevice*                    pRende
             {
                 // Separate samplers are enumerated before separate images, so the sampler
                 // assigned to this separate image must have already been created.
-                SamplerInd = FindAssignedSampler(ResLayout, Resources, Attribs, CurrResInd[ShaderInd][VarType], VarType);
+                SamplerInd = FindAssignedSampler(ResLayout, Resources, Attribs, CurrResInd[ShaderStageInd][VarType], VarType);
             }
 
             VkSampler vkImmutableSampler = VK_NULL_HANDLE;
@@ -580,8 +627,13 @@ void ShaderResourceLayoutVk::Initialize(IRenderDevice*                    pRende
                 Int32 SrcImmutableSamplerInd = FindImmutableSampler(ShaderType, ResourceLayoutDesc, Attribs, Resources.GetCombinedSamplerSuffix());
                 if (SrcImmutableSamplerInd >= 0)
                 {
-                    auto& ImmutableSampler = ResLayout.GetImmutableSampler(CurrImmutableSamplerInd[ShaderInd]++);
-                    VERIFY(!ImmutableSampler, "Immutable sampler has already been initialized!");
+                    // NB: for immutable separate samplers we still allocate VkResource instances, but they are never exposed to the app
+
+                    // We reserve enough space for the maximum number of immutable samplers that may be used in the stage,
+                    // but not all of them will necessarily be initialized.
+                    auto& ImmutableSampler = ResLayout.GetImmutableSampler(CurrImmutableSamplerInd[ShaderStageInd]++);
+                    VERIFY(!ImmutableSampler, "Immutable sampler has already been initialized. This is unexpected "
+                                              "as all resources are deduplicated and should only be initialized once.");
                     const auto& ImmutableSamplerDesc = ResourceLayoutDesc.ImmutableSamplers[SrcImmutableSamplerInd].Desc;
                     pRenderDevice->CreateSampler(ImmutableSamplerDesc, &ImmutableSampler);
                     vkImmutableSampler = ImmutableSampler.RawPtr<SamplerVkImpl>()->GetVkSampler();
@@ -603,83 +655,61 @@ void ShaderResourceLayoutVk::Initialize(IRenderDevice*                    pRende
             dbgBindings_CacheOffsets[DescriptorSet] = std::make_pair(Binding, CacheOffset);
 #endif
 
-            auto& ResInd    = CurrResInd[ShaderInd][VarType];
+            auto& ResInd    = CurrResInd[ShaderStageInd][VarType];
             ResIter->second = ResInd;
 
             pResource = ::new (&ResLayout.GetResource(VarType, ResInd++)) VkResource //
                 {
                     ResLayout,
-                    stringPools[ShaderInd].CopyString(Attribs.Name),
-                    Attribs.ArraySize,
-                    Attribs.Type,
-                    Attribs.GetResourceDimension(),
-                    Attribs.IsMultisample(),
+                    stringPools[ShaderStageInd].CopyString(Attribs.Name),
+                    Attribs,
                     VarType,
                     Binding,
                     DescriptorSet,
                     CacheOffset,
                     SamplerInd,
-                    vkImmutableSampler != VK_NULL_HANDLE,
-                    Attribs.BufferStaticSize,
-                    Attribs.BufferStride //
+                    vkImmutableSampler != VK_NULL_HANDLE //
                 };
         }
         else
         {
             // merge with existing
             pResource = &ResLayout.GetResource(VarType, ResIter->second);
-
-            VERIFY_EXPR(pResource->VariableType == VarType);
-            VERIFY_EXPR(pResource->Type == Attribs.Type);
-            VERIFY_EXPR(pResource->ResourceDim == Attribs.ResourceDim);
-            VERIFY_EXPR(pResource->IsMS == Attribs.IsMS);
-            VERIFY_EXPR(pResource->ArraySize == Attribs.ArraySize);
+            VerifyResourceMerge(*pResource, Attribs, VarType);
         }
         VERIFY_EXPR(pResource != nullptr);
         SPIRV[Attribs.BindingDecorationOffset]       = pResource->Binding;
         SPIRV[Attribs.DescriptorSetDecorationOffset] = pResource->DescriptorSet;
     };
 
-    // First process uniform buffers for all shader stages to make sure all UBs go first in every descriptor set
+    // First process uniform buffers for ALL shader stages to make sure all UBs go first in every descriptor set
     for (size_t s = 0; s < ShaderStages.size(); ++s)
     {
-        auto& Shaders   = ShaderStages[s].Shaders;
-        auto& Layout    = Layouts[s];
-        auto& NameToIdx = ResourceNameToIndexArray[s];
+        auto& Shaders = ShaderStages[s].Shaders;
         for (size_t i = 0; i < Shaders.size(); ++i)
         {
             auto& SPIRV     = ShaderStages[s].SPIRVs[i];
             auto& Resources = *Shaders[i]->GetShaderResources();
             for (Uint32 n = 0; n < Resources.GetNumUBs(); ++n)
             {
-                const auto& UB      = Resources.GetUB(n);
-                auto        VarType = GetShaderVariableType(Resources.GetShaderType(), UB.Name, ResourceLayoutDesc);
-                if (IsAllowedType(VarType, AllowedTypeBits))
-                {
-                    AddResource(static_cast<Uint32>(s), Layout, Resources, UB, NameToIdx, SPIRV);
-                }
+                const auto& UB = Resources.GetUB(n);
+                AddResource(static_cast<Uint32>(s), Resources, UB, SPIRV);
             }
         }
     }
 
-    // Second, process all storage buffers
+    // Second, process all storage buffers in all shader stages
     for (size_t s = 0; s < ShaderStages.size(); ++s)
     {
-        auto& Shaders   = ShaderStages[s].Shaders;
-        auto& Layout    = Layouts[s];
-        auto& NameToIdx = ResourceNameToIndexArray[s];
+        auto& Shaders = ShaderStages[s].Shaders;
         for (size_t i = 0; i < Shaders.size(); ++i)
         {
             auto& Resources = *Shaders[i]->GetShaderResources();
             auto& SPIRV     = ShaderStages[s].SPIRVs[i];
             for (Uint32 n = 0; n < Resources.GetNumSBs(); ++n)
             {
-                const auto& SB      = Resources.GetSB(n);
-                auto        VarType = GetShaderVariableType(Resources.GetShaderType(), SB.Name, ResourceLayoutDesc);
-                if (IsAllowedType(VarType, AllowedTypeBits))
-                {
-                    AddResource(static_cast<Uint32>(s), Layout, Resources, SB, NameToIdx, SPIRV);
-                }
+                const auto& SB = Resources.GetSB(n);
+                AddResource(static_cast<Uint32>(s), Resources, SB, SPIRV);
             }
         }
     }
@@ -687,9 +717,7 @@ void ShaderResourceLayoutVk::Initialize(IRenderDevice*                    pRende
     // Finally, process all other resource types
     for (size_t s = 0; s < ShaderStages.size(); ++s)
     {
-        auto& Layout    = Layouts[s];
-        auto& Shaders   = ShaderStages[s].Shaders;
-        auto& NameToIdx = ResourceNameToIndexArray[s];
+        auto& Shaders = ShaderStages[s].Shaders;
         for (size_t i = 0; i < Shaders.size(); ++i)
         {
             auto& Resources = *Shaders[i]->GetShaderResources();
@@ -709,37 +737,32 @@ void ShaderResourceLayoutVk::Initialize(IRenderDevice*                    pRende
                 [&](const SPIRVShaderResourceAttribs& Img, Uint32)
                 {
                     VERIFY_EXPR(Img.Type == SPIRVShaderResourceAttribs::ResourceType::StorageImage || Img.Type == SPIRVShaderResourceAttribs::ResourceType::StorageTexelBuffer);
-                    AddResource(static_cast<Uint32>(s), Layout, Resources, Img, NameToIdx, SPIRV);
+                    AddResource(static_cast<Uint32>(s), Resources, Img, SPIRV);
                 },
                 [&](const SPIRVShaderResourceAttribs& SmplImg, Uint32)
                 {
                     VERIFY_EXPR(SmplImg.Type == SPIRVShaderResourceAttribs::ResourceType::SampledImage || SmplImg.Type == SPIRVShaderResourceAttribs::ResourceType::UniformTexelBuffer);
-                    AddResource(static_cast<Uint32>(s), Layout, Resources, SmplImg, NameToIdx, SPIRV);
-                },
-                [&](const SPIRVShaderResourceAttribs& AC, Uint32)
-                {
-                    VERIFY_EXPR(AC.Type == SPIRVShaderResourceAttribs::ResourceType::AtomicCounter);
-                    AddResource(static_cast<Uint32>(s), Layout, Resources, AC, NameToIdx, SPIRV);
+                    AddResource(static_cast<Uint32>(s), Resources, SmplImg, SPIRV);
                 },
                 [&](const SPIRVShaderResourceAttribs& SepSmpl, Uint32)
                 {
                     VERIFY_EXPR(SepSmpl.Type == SPIRVShaderResourceAttribs::ResourceType::SeparateSampler);
-                    AddResource(static_cast<Uint32>(s), Layout, Resources, SepSmpl, NameToIdx, SPIRV);
+                    AddResource(static_cast<Uint32>(s), Resources, SepSmpl, SPIRV);
                 },
                 [&](const SPIRVShaderResourceAttribs& SepImg, Uint32)
                 {
                     VERIFY_EXPR(SepImg.Type == SPIRVShaderResourceAttribs::ResourceType::SeparateImage || SepImg.Type == SPIRVShaderResourceAttribs::ResourceType::UniformTexelBuffer);
-                    AddResource(static_cast<Uint32>(s), Layout, Resources, SepImg, NameToIdx, SPIRV);
+                    AddResource(static_cast<Uint32>(s), Resources, SepImg, SPIRV);
                 },
                 [&](const SPIRVShaderResourceAttribs& InputAtt, Uint32)
                 {
                     VERIFY_EXPR(InputAtt.Type == SPIRVShaderResourceAttribs::ResourceType::InputAttachment);
-                    AddResource(static_cast<Uint32>(s), Layout, Resources, InputAtt, NameToIdx, SPIRV);
+                    AddResource(static_cast<Uint32>(s), Resources, InputAtt, SPIRV);
                 },
                 [&](const SPIRVShaderResourceAttribs& AccelStruct, Uint32)
                 {
                     VERIFY_EXPR(AccelStruct.Type == SPIRVShaderResourceAttribs::ResourceType::AccelerationStructure);
-                    AddResource(static_cast<Uint32>(s), Layout, Resources, AccelStruct, NameToIdx, SPIRV);
+                    AddResource(static_cast<Uint32>(s), Resources, AccelStruct, SPIRV);
                 }
             );
             // clang-format on
@@ -1272,15 +1295,19 @@ void ShaderResourceLayoutVk::InitializeStaticResources(const ShaderResourceLayou
     // Static shader resources are stored in one large continuous descriptor set
     for (Uint32 r = 0; r < NumStaticResources; ++r)
     {
-        // Get resource attributes
+        // Get resource attributes. Resources have the same index in both layouts.
         const auto& DstRes = GetResource(SHADER_RESOURCE_VARIABLE_TYPE_STATIC, r);
         const auto& SrcRes = SrcLayout.GetResource(SHADER_RESOURCE_VARIABLE_TYPE_STATIC, r);
+        VERIFY(strcmp(SrcRes.Name, DstRes.Name) == 0, "Src resource name ('", SrcRes.Name, "') does match the dst resource name '(", DstRes.Name, "'). This is a bug.");
+        VERIFY(SrcRes.Type == DstRes.Type, "Src and dst resource types are incompatible. This is a bug.");
+        VERIFY(SrcRes.ResourceDim == DstRes.ResourceDim, "Src and dst resource dimensions are incompatible. This is a bug.");
         VERIFY(SrcRes.Binding == Uint32{SrcRes.Type}, "Unexpected binding");
-        VERIFY(SrcRes.ArraySize == DstRes.ArraySize, "Inconsistent array size");
+        VERIFY(SrcRes.ArraySize == DstRes.ArraySize, "Src and dst resource array sizes are not identical. This is a bug.");
+        VERIFY(SrcRes.IsImmutableSamplerAssigned() == DstRes.IsImmutableSamplerAssigned(), "Src and dst resource immutable sampler flags are not identical. This is a bug.");
 
         if (DstRes.Type == SPIRVShaderResourceAttribs::ResourceType::SeparateSampler &&
             DstRes.IsImmutableSamplerAssigned())
-            continue; // Skip immutable samplers
+            continue; // Skip immutable separate samplers
 
         for (Uint32 ArrInd = 0; ArrInd < DstRes.ArraySize; ++ArrInd)
         {

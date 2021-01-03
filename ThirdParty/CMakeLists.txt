@@ -111,6 +111,9 @@ if(VULKAN_SUPPORTED OR METAL_SUPPORTED)
         C_VISIBILITY_PRESET hidden # -fvisibility=hidden
         VISIBILITY_INLINES_HIDDEN TRUE
      )
+     
+    add_subdirectory(SPIRV-Reflect)
+    set_directory_root_folder("SPIRV-Reflect" "DiligentCore/ThirdParty/SPIRV-Reflect")
 endif()
 
 if(${DILIGENT_BUILD_TESTS})

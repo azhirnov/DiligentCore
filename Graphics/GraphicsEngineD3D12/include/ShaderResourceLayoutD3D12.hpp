@@ -119,29 +119,29 @@ namespace Diligent
 class ShaderResourceLayoutD3D12 final
 {
 public:
-    explicit ShaderResourceLayoutD3D12(IObject& Owner) noexcept :
-        m_Owner{Owner}
+    ShaderResourceLayoutD3D12(IObject& Owner, ID3D12Device* pd3d12Device) noexcept :
+        m_Owner{Owner},
+        m_pd3d12Device{pd3d12Device}
     {
 #if defined(_MSC_VER) && defined(_WIN64)
         static_assert(sizeof(*this) == 56, "Unexpected sizeof(ShaderResourceLayoutD3D12)");
 #endif
     }
 
-    // There are two modes a layout can be initialized:
-    //  - initialize static resource layout and initialize shader resource cache to hold static resources
-    //  - initialize reference layouts that address all types of resources (static, mutable, dynamic).
-    //    Root indices and descriptor table offsets are assigned during the initialization;
-    //    no shader resource cache is provided
-    void Initialize(ID3D12Device*                              pd3d12Device,
-                    PIPELINE_TYPE                              PipelineType,
-                    const PipelineResourceLayoutDesc&          ResourceLayout,
-                    const std::vector<ShaderD3D12Impl*>&       Shaders,
-                    IMemoryAllocator&                          LayoutDataAllocator,
-                    const SHADER_RESOURCE_VARIABLE_TYPE* const VarTypes,
-                    Uint32                                     NumAllowedTypes,
-                    ShaderResourceCacheD3D12*                  pResourceCache,
-                    class RootSignatureBuilder*                pRootSig,
-                    class LocalRootSignature*                  pLocalRootSig);
+    // Initializes reference layouts that address all types of resources (static, mutable, dynamic).
+    // Root indices and descriptor table offsets are assigned during the initialization.
+    void Initialize(PIPELINE_TYPE                        PipelineType,
+                    const PipelineResourceLayoutDesc&    ResourceLayout,
+                    const std::vector<ShaderD3D12Impl*>& Shaders,
+                    IMemoryAllocator&                    LayoutDataAllocator,
+                    class RootSignatureBuilder&          RootSgnBldr,
+                    class LocalRootSignature*            pLocalRootSig);
+
+    // Copies static resources from the source layout and initializes the
+    // resource cache. Uses bind points from the source layout.
+    void InitializeStaticReourceLayout(const ShaderResourceLayoutD3D12& SrcLayout,
+                                       IMemoryAllocator&                LayoutDataAllocator,
+                                       ShaderResourceCacheD3D12&        ResourceCache);
 
     // clang-format off
     ShaderResourceLayoutD3D12            (const ShaderResourceLayoutD3D12&) = delete;
@@ -156,33 +156,31 @@ public:
     struct D3D12Resource final
     {
         // clang-format off
+        D3D12Resource           (const D3D12Resource&)  = delete;
+        D3D12Resource           (      D3D12Resource&&) = delete;
+        D3D12Resource& operator=(const D3D12Resource&)  = delete;
+        D3D12Resource& operator=(      D3D12Resource&&) = delete;
+        // clang-format on
 
-        D3D12Resource             (const D3D12Resource&)  = delete;
-        D3D12Resource             (      D3D12Resource&&) = delete;
-        D3D12Resource& operator = (const D3D12Resource&)  = delete;
-        D3D12Resource& operator = (      D3D12Resource&&) = delete;
+        static constexpr Uint32 ResourceTypeBits = 3;
+        static constexpr Uint32 VariableTypeBits = 2;
+        static constexpr Uint32 RootIndexBits    = 32 - ResourceTypeBits - VariableTypeBits;
 
-        static constexpr const Uint32 ResourceTypeBits = 3;
-        static constexpr const Uint32 VariableTypeBits = 2;
-        static constexpr const Uint32 RootIndexBits    = 32 - ResourceTypeBits - VariableTypeBits;
+        static constexpr Uint32 InvalidRootIndex = (1U << RootIndexBits) - 1U;
+        static constexpr Uint32 MaxRootIndex     = InvalidRootIndex - 1U;
 
-        static constexpr const Uint32 InvalidRootIndex = (1U << RootIndexBits) - 1U;
-        static constexpr const Uint32 MaxRootIndex     = InvalidRootIndex - 1U;
+        static constexpr Uint32 InvalidOffset = static_cast<Uint32>(-1);
 
-        static constexpr const Uint32 InvalidOffset    = static_cast<Uint32>(-1);
-
-        static_assert(SHADER_RESOURCE_VARIABLE_TYPE_NUM_TYPES < (1 << VariableTypeBits),        "Not enough bits to represent SHADER_RESOURCE_VARIABLE_TYPE");
+        static_assert(SHADER_RESOURCE_VARIABLE_TYPE_NUM_TYPES < (1 << VariableTypeBits), "Not enough bits to represent SHADER_RESOURCE_VARIABLE_TYPE");
         static_assert(static_cast<int>(CachedResourceType::NumTypes) < (1 << ResourceTypeBits), "Not enough bits to represent CachedResourceType");
 
-/* 0  */ const ShaderResourceLayoutD3D12& ParentResLayout;
-/* 8  */ const D3DShaderResourceAttribs   Attribs;
-/*24  */ const Uint32                     OffsetFromTableStart;
-/*28.0*/ const Uint32                     ResourceType : ResourceTypeBits; // | 0 1 2 |
-/*28.3*/ const Uint32                     VariableType : VariableTypeBits; //         | 3 4 |
-/*28.5*/ const Uint32                     RootIndex    : RootIndexBits;    //               | 5 6 7 ... 15 |
-/*32  */ // End of data
-
-        // clang-format on
+        /* 0  */ const ShaderResourceLayoutD3D12& ParentResLayout;
+        /* 8  */ const D3DShaderResourceAttribs   Attribs; // Copy of the attributes, potentially with some changes to bindings
+        /*24  */ const Uint32                     OffsetFromTableStart;
+        /*28.0*/ const Uint32                     ResourceType : ResourceTypeBits; // | 0 1 2 |
+        /*28.3*/ const Uint32                     VariableType : VariableTypeBits; //         | 3 4 |
+        /*28.5*/ const Uint32                     RootIndex : RootIndexBits;       //               | 5 6 7 ... 15 |
+        /*32  */                                                                   // End of data
 
         D3D12Resource(const ShaderResourceLayoutD3D12& _ParentLayout,
                       StringPool&                      _StringPool,
@@ -283,6 +281,10 @@ public:
     {
         return m_SamplersOffsets[VarType + 1] - m_SamplersOffsets[VarType];
     }
+    Uint32 GetTotalResourceCount() const
+    {
+        return m_SamplersOffsets[SHADER_RESOURCE_VARIABLE_TYPE_NUM_TYPES];
+    }
 
     const D3D12Resource& GetSrvCbvUav(SHADER_RESOURCE_VARIABLE_TYPE VarType, Uint32 r) const
     {
@@ -295,6 +297,13 @@ public:
         return GetResource(GetSamplerOffset(VarType, s));
     }
 
+    const D3D12Resource& GetResource(Uint32 r) const
+    {
+        VERIFY_EXPR(r < GetTotalResourceCount());
+        const auto* Resources = reinterpret_cast<const D3D12Resource*>(m_ResourceBuffer.get());
+        return Resources[r];
+    }
+
     const bool IsUsingSeparateSamplers() const { return m_IsUsingSeparateSamplers; }
 
     SHADER_TYPE GetShaderType() const { return m_ShaderType; }
@@ -304,6 +313,8 @@ public:
 private:
     const D3D12Resource& GetAssignedSampler(const D3D12Resource& TexSrv) const;
     D3D12Resource&       GetAssignedSampler(const D3D12Resource& TexSrv);
+
+    Uint32 FindSamplerByName(const char* SamplerName) const;
 
     const Char* GetShaderName() const
     {
@@ -320,21 +331,11 @@ private:
     {
         return m_SamplersOffsets[SHADER_RESOURCE_VARIABLE_TYPE_NUM_TYPES] - m_SamplersOffsets[0];
     }
-    Uint32 GetTotalResourceCount() const
-    {
-        return m_SamplersOffsets[SHADER_RESOURCE_VARIABLE_TYPE_NUM_TYPES];
-    }
 
     D3D12Resource& GetResource(Uint32 r)
     {
         VERIFY_EXPR(r < GetTotalResourceCount());
         auto* Resources = reinterpret_cast<D3D12Resource*>(m_ResourceBuffer.get());
-        return Resources[r];
-    }
-    const D3D12Resource& GetResource(Uint32 r) const
-    {
-        VERIFY_EXPR(r < GetTotalResourceCount());
-        const auto* Resources = reinterpret_cast<const D3D12Resource*>(m_ResourceBuffer.get());
         return Resources[r];
     }
 
@@ -349,6 +350,12 @@ private:
         VERIFY_EXPR(r < GetCbvSrvUavCount(VarType));
         return GetResource(GetSrvCbvUavOffset(VarType, r));
     }
+    const D3D12Resource& GetSrvCbvUav(Uint32 r) const
+    {
+        VERIFY_EXPR(r < GetTotalSrvCbvUavCount());
+        return GetResource(m_CbvSrvUavOffsets[0] + r);
+    }
+
 
     Uint32 GetSamplerOffset(SHADER_RESOURCE_VARIABLE_TYPE VarType, Uint32 s) const
     {

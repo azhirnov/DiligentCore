@@ -46,11 +46,7 @@
 #include "RefCntAutoPtr.hpp"
 #include "StringPool.hpp"
 
-namespace diligent_spirv_cross
-{
-class Compiler;
-struct Resource;
-} // namespace diligent_spirv_cross
+struct SpvReflectDescriptorBinding;
 
 namespace Diligent
 {
@@ -101,13 +97,12 @@ public:
 
     // clang-format on
 
-    SPIRVShaderResourceAttribs(const diligent_spirv_cross::Compiler& Compiler,
-                               const diligent_spirv_cross::Resource& Res,
-                               const char*                           _Name,
-                               ResourceType                          _Type,
-                               Uint32                                _SamplerOrSepImgInd = InvalidSepSmplrOrImgInd,
-                               Uint32                                _BufferStaticSize   = 0,
-                               Uint32                                _BufferStride       = 0) noexcept;
+    SPIRVShaderResourceAttribs(const SpvReflectDescriptorBinding& Binding,
+                               const char*                        _Name,
+                               ResourceType                       _Type,
+                               Uint32                             _SamplerOrSepImgInd = InvalidSepSmplrOrImgInd,
+                               Uint32                             _BufferStaticSize   = 0,
+                               Uint32                             _BufferStride       = 0) noexcept;
 
     bool IsValidSepSamplerAssigned() const
     {
@@ -190,13 +185,13 @@ static_assert(sizeof(SPIRVShaderStageInputAttribs) % sizeof(void*) == 0, "Size o
 class SPIRVShaderResources
 {
 public:
-    SPIRVShaderResources(IMemoryAllocator&     Allocator,
-                         IRenderDevice*        pRenderDevice,
-                         std::vector<uint32_t> spirv_binary,
-                         const ShaderDesc&     shaderDesc,
-                         const char*           CombinedSamplerSuffix,
-                         bool                  LoadShaderStageInputs,
-                         std::string&          EntryPoint);
+    SPIRVShaderResources(IMemoryAllocator&            Allocator,
+                         IRenderDevice*               pRenderDevice,
+                         const std::vector<uint32_t>& spirv_binary,
+                         const ShaderDesc&            shaderDesc,
+                         const char*                  CombinedSamplerSuffix,
+                         bool                         LoadShaderStageInputs,
+                         std::string&                 EntryPoint);
 
     // clang-format off
     SPIRVShaderResources             (const SPIRVShaderResources&)  = delete;
@@ -212,8 +207,7 @@ public:
     Uint32 GetNumUBs         ()const noexcept{ return (m_StorageBufferOffset   - 0);                      }
     Uint32 GetNumSBs         ()const noexcept{ return (m_StorageImageOffset    - m_StorageBufferOffset);  }
     Uint32 GetNumImgs        ()const noexcept{ return (m_SampledImageOffset    - m_StorageImageOffset);   }
-    Uint32 GetNumSmpldImgs   ()const noexcept{ return (m_AtomicCounterOffset   - m_SampledImageOffset);   }
-    Uint32 GetNumACs         ()const noexcept{ return (m_SeparateSamplerOffset - m_AtomicCounterOffset);  }
+    Uint32 GetNumSmpldImgs   ()const noexcept{ return (m_SeparateSamplerOffset - m_SampledImageOffset);   }
     Uint32 GetNumSepSmplrs   ()const noexcept{ return (m_SeparateImageOffset   - m_SeparateSamplerOffset);}
     Uint32 GetNumSepImgs     ()const noexcept{ return (m_InputAttachmentOffset - m_SeparateImageOffset);  }
     Uint32 GetNumInptAtts    ()const noexcept{ return (m_AccelStructOffset     - m_InputAttachmentOffset);}
@@ -225,7 +219,6 @@ public:
     const SPIRVShaderResourceAttribs& GetSB         (Uint32 n)const noexcept{ return GetResAttribs(n, GetNumSBs(),          m_StorageBufferOffset  ); }
     const SPIRVShaderResourceAttribs& GetImg        (Uint32 n)const noexcept{ return GetResAttribs(n, GetNumImgs(),         m_StorageImageOffset   ); }
     const SPIRVShaderResourceAttribs& GetSmpldImg   (Uint32 n)const noexcept{ return GetResAttribs(n, GetNumSmpldImgs(),    m_SampledImageOffset   ); }
-    const SPIRVShaderResourceAttribs& GetAC         (Uint32 n)const noexcept{ return GetResAttribs(n, GetNumACs(),          m_AtomicCounterOffset  ); }
     const SPIRVShaderResourceAttribs& GetSepSmplr   (Uint32 n)const noexcept{ return GetResAttribs(n, GetNumSepSmplrs(),    m_SeparateSamplerOffset); }
     const SPIRVShaderResourceAttribs& GetSepImg     (Uint32 n)const noexcept{ return GetResAttribs(n, GetNumSepImgs(),      m_SeparateImageOffset  ); }
     const SPIRVShaderResourceAttribs& GetInptAtt    (Uint32 n)const noexcept{ return GetResAttribs(n, GetNumInptAtts(),     m_InputAttachmentOffset); }
@@ -254,7 +247,6 @@ public:
         Uint32 NumSBs          = 0;
         Uint32 NumImgs         = 0;
         Uint32 NumSmpldImgs    = 0;
-        Uint32 NumACs          = 0;
         Uint32 NumSepSmplrs    = 0;
         Uint32 NumSepImgs      = 0;
         Uint32 NumInptAtts     = 0;
@@ -268,7 +260,6 @@ public:
               typename THandleSB,
               typename THandleImg,
               typename THandleSmplImg,
-              typename THandleAC,
               typename THandleSepSmpl,
               typename THandleSepImg,
               typename THandleInptAtt,
@@ -277,7 +268,6 @@ public:
                           THandleSB          HandleSB,
                           THandleImg         HandleImg,
                           THandleSmplImg     HandleSmplImg,
-                          THandleAC          HandleAC,
                           THandleSepSmpl     HandleSepSmpl,
                           THandleSepImg      HandleSepImg,
                           THandleInptAtt     HandleInptAtt,
@@ -305,12 +295,6 @@ public:
         {
             const auto& SmplImg = GetSmpldImg(n);
             HandleSmplImg(SmplImg, n);
-        }
-
-        for (Uint32 n = 0; n < GetNumACs(); ++n)
-        {
-            const auto& AC = GetAC(n);
-            HandleAC(AC, n);
         }
 
         for (Uint32 n = 0; n < GetNumSepSmplrs(); ++n)
@@ -391,7 +375,6 @@ private:
     SPIRVShaderResourceAttribs& GetSB         (Uint32 n)noexcept{ return GetResAttribs(n, GetNumSBs(),          m_StorageBufferOffset  ); }
     SPIRVShaderResourceAttribs& GetImg        (Uint32 n)noexcept{ return GetResAttribs(n, GetNumImgs(),         m_StorageImageOffset   ); }
     SPIRVShaderResourceAttribs& GetSmpldImg   (Uint32 n)noexcept{ return GetResAttribs(n, GetNumSmpldImgs(),    m_SampledImageOffset   ); }
-    SPIRVShaderResourceAttribs& GetAC         (Uint32 n)noexcept{ return GetResAttribs(n, GetNumACs(),          m_AtomicCounterOffset  ); }
     SPIRVShaderResourceAttribs& GetSepSmplr   (Uint32 n)noexcept{ return GetResAttribs(n, GetNumSepSmplrs(),    m_SeparateSamplerOffset); }
     SPIRVShaderResourceAttribs& GetSepImg     (Uint32 n)noexcept{ return GetResAttribs(n, GetNumSepImgs(),      m_SeparateImageOffset  ); }
     SPIRVShaderResourceAttribs& GetInptAtt    (Uint32 n)noexcept{ return GetResAttribs(n, GetNumInptAtts(),     m_InputAttachmentOffset); }
@@ -416,7 +399,6 @@ private:
     OffsetType m_StorageBufferOffset   = 0;
     OffsetType m_StorageImageOffset    = 0;
     OffsetType m_SampledImageOffset    = 0;
-    OffsetType m_AtomicCounterOffset   = 0;
     OffsetType m_SeparateSamplerOffset = 0;
     OffsetType m_SeparateImageOffset   = 0;
     OffsetType m_InputAttachmentOffset = 0;

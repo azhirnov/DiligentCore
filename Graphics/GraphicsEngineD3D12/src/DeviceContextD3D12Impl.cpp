@@ -178,8 +178,6 @@ DeviceContextD3D12Impl::~DeviceContextD3D12Impl()
     }
 }
 
-IMPLEMENT_QUERY_INTERFACE(DeviceContextD3D12Impl, IID_DeviceContextD3D12, TDeviceContextBase)
-
 void DeviceContextD3D12Impl::SetPipelineState(IPipelineState* pPipelineState)
 {
     auto* pPipelineStateD3D12 = ValidatedCast<PipelineStateD3D12Impl>(pPipelineState);
@@ -2312,7 +2310,7 @@ void DeviceContextD3D12Impl::BuildBLAS(const BuildBLASAttribs& Attribs)
 
             if (GeoIdx == INVALID_INDEX || Idx == INVALID_INDEX)
             {
-                UNEXPECTED("Failed to find geometry by name");
+                UNEXPECTED("Failed to find geometry '", SrcTris.GeometryName, '\'');
                 continue;
             }
 
@@ -2384,7 +2382,7 @@ void DeviceContextD3D12Impl::BuildBLAS(const BuildBLASAttribs& Attribs)
 
             if (GeoIdx == INVALID_INDEX || Idx == INVALID_INDEX)
             {
-                UNEXPECTED("Failed to find geometry by name");
+                UNEXPECTED("Failed to find geometry '", SrcBoxes.GeometryName, '\'');
                 continue;
             }
 
@@ -2643,7 +2641,7 @@ void DeviceContextD3D12Impl::TraceRays(const TraceRaysAttribs& Attribs)
 
     if (RayGenShaderRecord.pData || MissShaderTable.pData || HitGroupTable.pData || CallableShaderTable.pData)
     {
-        TransitionOrVerifyBufferState(CmdCtx, *pBufferD3D12, Attribs.SBTTransitionMode, RESOURCE_STATE_COPY_DEST, OpName);
+        TransitionOrVerifyBufferState(CmdCtx, *pBufferD3D12, RESOURCE_STATE_TRANSITION_MODE_TRANSITION, RESOURCE_STATE_COPY_DEST, OpName);
 
         // buffer ranges are not intersected, so we don't need to add barriers between them
         if (RayGenShaderRecord.pData)
@@ -2658,7 +2656,7 @@ void DeviceContextD3D12Impl::TraceRays(const TraceRaysAttribs& Attribs)
         if (CallableShaderTable.pData)
             UpdateBuffer(pBufferD3D12, CallableShaderTable.Offset, CallableShaderTable.Size, CallableShaderTable.pData, RESOURCE_STATE_TRANSITION_MODE_VERIFY);
     }
-    TransitionOrVerifyBufferState(CmdCtx, *pBufferD3D12, Attribs.SBTTransitionMode, RESOURCE_STATE_RAY_TRACING, OpName);
+    TransitionOrVerifyBufferState(CmdCtx, *pBufferD3D12, RESOURCE_STATE_TRANSITION_MODE_TRANSITION, RESOURCE_STATE_RAY_TRACING, OpName);
 
     D3D12_DISPATCH_RAYS_DESC d3d12DispatchDesc = {};
 

@@ -41,8 +41,9 @@ BottomLevelASD3D12Impl::BottomLevelASD3D12Impl(IReferenceCounters*      pRefCoun
                                                const BottomLevelASDesc& Desc) :
     TBottomLevelASBase{pRefCounters, pDeviceD3D12, Desc}
 {
-    auto*  pd3d12Device             = pDeviceD3D12->GetD3D12Device5();
-    UINT64 ResultDataMaxSizeInBytes = 0;
+    auto*       pd3d12Device             = pDeviceD3D12->GetD3D12Device5();
+    const auto& Limits                   = pDeviceD3D12->GetProperties();
+    UINT64      ResultDataMaxSizeInBytes = 0;
 
     if (m_Desc.CompactedSize)
     {
@@ -77,7 +78,8 @@ BottomLevelASD3D12Impl::BottomLevelASD3D12Impl(IReferenceCounters*      pRefCoun
 
                 MaxPrimitiveCount += src.MaxPrimitiveCount;
             }
-            VERIFY_EXPR(MaxPrimitiveCount <= pDeviceD3D12->GetProperties().MaxPrimitivesPerBLAS);
+            DEV_CHECK_ERR(MaxPrimitiveCount <= Limits.MaxPrimitivesPerBLAS,
+                          "Max primitive count (", MaxPrimitiveCount, ") exceeds device limit (", Limits.MaxPrimitivesPerBLAS, ")");
         }
         else if (m_Desc.pBoxes != nullptr)
         {
@@ -96,14 +98,16 @@ BottomLevelASD3D12Impl::BottomLevelASD3D12Impl(IReferenceCounters*      pRefCoun
 
                 MaxBoxCount += src.MaxBoxCount;
             }
-            VERIFY_EXPR(MaxBoxCount <= pDeviceD3D12->GetProperties().MaxPrimitivesPerBLAS);
+            DEV_CHECK_ERR(MaxBoxCount <= Limits.MaxPrimitivesPerBLAS,
+                          "Max box count (", MaxBoxCount, ") exceeds device limit (", Limits.MaxPrimitivesPerBLAS, ")");
         }
         else
         {
             UNEXPECTED("Either pTriangles or pBoxes must not be null");
         }
 
-        VERIFY_EXPR(d3d12Geometries.size() <= pDeviceD3D12->GetProperties().MaxGeometriesPerBLAS);
+        DEV_CHECK_ERR(d3d12Geometries.size() <= Limits.MaxGeometriesPerBLAS,
+                      "The number of geometries (", d3d12Geometries.size(), ") exceeds device limit (", Limits.MaxGeometriesPerBLAS, ")");
 
         d3d12BottomLevelInputs.Type           = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
         d3d12BottomLevelInputs.Flags          = BuildASFlagsToD3D12ASBuildFlags(m_Desc.Flags);
@@ -170,8 +174,7 @@ BottomLevelASD3D12Impl::BottomLevelASD3D12Impl(IReferenceCounters*          pRef
 BottomLevelASD3D12Impl::~BottomLevelASD3D12Impl()
 {
     // D3D12 object can only be destroyed when it is no longer used by the GPU
-    auto* pDeviceD3D12Impl = ValidatedCast<RenderDeviceD3D12Impl>(GetDevice());
-    pDeviceD3D12Impl->SafeReleaseDeviceObject(std::move(m_pd3d12Resource), m_Desc.CommandQueueMask);
+    GetDevice()->SafeReleaseDeviceObject(std::move(m_pd3d12Resource), m_Desc.CommandQueueMask);
 }
 
 } // namespace Diligent

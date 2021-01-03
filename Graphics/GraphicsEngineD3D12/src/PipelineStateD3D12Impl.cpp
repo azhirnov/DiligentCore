@@ -27,6 +27,8 @@
 
 #include "pch.h"
 #include <array>
+#include <sstream>
+
 #include "PipelineStateD3D12Impl.hpp"
 #include "ShaderD3D12Impl.hpp"
 #include "D3D12TypeConversions.hpp"
@@ -109,23 +111,11 @@ void BuildRTPipelineDescription(const RayTracingPipelineStateCreateInfo& CreateI
                                 IDXCompiler*                             compiler,
                                 const TBindingMapPerStage&               BindingMapPerStage) noexcept(false)
 {
-#define LOG_PSO_ERROR_AND_THROW(...) LOG_ERROR_AND_THROW("Description of ray tracing PSO '", CreateInfo.PSODesc.Name, "' is invalid: ", ##__VA_ARGS__)
+#define LOG_PSO_ERROR_AND_THROW(...) LOG_ERROR_AND_THROW("Description of ray tracing PSO '", (CreateInfo.PSODesc.Name ? CreateInfo.PSODesc.Name : ""), "' is invalid: ", ##__VA_ARGS__)
 
-    Uint32 UnnamedShaderIndex = 0;
+    Uint32 UnnamedExportIndex = 0;
 
     std::unordered_map<IShader*, LPCWSTR> UniqueShaders;
-
-    const auto ShaderIndexToStr = [&TempPool](Uint32 Index) -> LPCWSTR {
-        const Uint32 Len = sizeof(Index) * 2;
-        auto* const  Dst = TempPool.Allocate<WCHAR>(Len + 1);
-        for (Uint32 i = 0; i < Len; ++i)
-        {
-            Dst[Len - 1 - i] = L"0123456789ABCDEF"[Index & 0x0F];
-            Index >>= 4;
-        }
-        Dst[Len] = 0;
-        return Dst;
-    };
 
     const auto AddDxilLib = [&](IShader* pShader, const char* Name) -> LPCWSTR {
         if (pShader == nullptr)
@@ -142,7 +132,7 @@ void BuildRTPipelineDescription(const RayTracingPipelineStateCreateInfo& CreateI
 
             CComPtr<IDxcBlob> pBlob;
             if (!compiler->RemapResourceBindings(BindingMap, reinterpret_cast<IDxcBlob*>(pShaderD3D12->GetShaderByteCode()), &pBlob))
-                LOG_ERROR_AND_THROW("Failed to remap resource bindings");
+                LOG_ERROR_AND_THROW("Failed to remap resource bindings in shader '", pShaderD3D12->GetDesc().Name, "'.");
 
             LibDesc.DXILLibrary.BytecodeLength  = pBlob->GetBufferSize();
             LibDesc.DXILLibrary.pShaderBytecode = pBlob->GetBufferPointer();
@@ -155,7 +145,11 @@ void BuildRTPipelineDescription(const RayTracingPipelineStateCreateInfo& CreateI
             if (Name != nullptr)
                 ExportDesc.Name = TempPool.CopyWString(Name);
             else
-                ExportDesc.Name = ShaderIndexToStr(++UnnamedShaderIndex);
+            {
+                std::stringstream ss;
+                ss << "__Shader_" << std::setfill('0') << std::setw(4) << UnnamedExportIndex++;
+                ExportDesc.Name = TempPool.CopyWString(ss.str());
+            }
 
             Subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &LibDesc});
             ShaderBlobs.push_back(pBlob);
@@ -206,8 +200,8 @@ void BuildRTPipelineDescription(const RayTracingPipelineStateCreateInfo& CreateI
     constexpr Uint32 DefaultPayloadSize = sizeof(float) * 8;
 
     auto& PipelineConfig = *TempPool.Construct<D3D12_RAYTRACING_PIPELINE_CONFIG>();
-    // For compatibility with Vulkan set minimal recursion depth to one, zero means no tracing of rays at all.
-    PipelineConfig.MaxTraceRecursionDepth = CreateInfo.RayTracingPipeline.MaxRecursionDepth + 1;
+
+    PipelineConfig.MaxTraceRecursionDepth = CreateInfo.RayTracingPipeline.MaxRecursionDepth;
     Subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_PIPELINE_CONFIG, &PipelineConfig});
 
     auto& ShaderConfig                   = *TempPool.Construct<D3D12_RAYTRACING_SHADER_CONFIG>();
@@ -221,10 +215,9 @@ template <typename TNameToGroupIndexMap>
 void GetShaderIdentifiers(ID3D12DeviceChild*                       pSO,
                           const RayTracingPipelineStateCreateInfo& CreateInfo,
                           const TNameToGroupIndexMap&              NameToGroupIndex,
-                          Uint8*                                   ShaderData)
+                          Uint8*                                   ShaderData,
+                          Uint32                                   ShaderIdentifierSize)
 {
-    const Uint32 ShaderIdentifierSize = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
-
     CComPtr<ID3D12StateObjectProperties> pStateObjectProperties;
 
     auto hr = pSO->QueryInterface(IID_PPV_ARGS(&pStateObjectProperties));
@@ -236,8 +229,10 @@ void GetShaderIdentifiers(ID3D12DeviceChild*                       pSO,
         const auto& GeneralShader = CreateInfo.pGeneralShaders[i];
 
         auto iter = NameToGroupIndex.find(GeneralShader.Name);
-        if (iter == NameToGroupIndex.end())
-            LOG_ERROR_AND_THROW("Failed to get shader group index for general shader group '", GeneralShader.Name, "'");
+        VERIFY(iter != NameToGroupIndex.end(),
+               "Can't find general shader '", GeneralShader.Name,
+               "'. This looks to be a bug as NameToGroupIndex is initialized by "
+               "CopyRTShaderGroupNames() that processes the same general shaders.");
 
         const auto* ShaderID = pStateObjectProperties->GetShaderIdentifier(WidenString(GeneralShader.Name).c_str());
         if (ShaderID == nullptr)
@@ -245,13 +240,16 @@ void GetShaderIdentifiers(ID3D12DeviceChild*                       pSO,
 
         std::memcpy(&ShaderData[ShaderIdentifierSize * iter->second], ShaderID, ShaderIdentifierSize);
     }
+
     for (Uint32 i = 0; i < CreateInfo.TriangleHitShaderCount; ++i)
     {
         const auto& TriHitShader = CreateInfo.pTriangleHitShaders[i];
 
         auto iter = NameToGroupIndex.find(TriHitShader.Name);
-        if (iter == NameToGroupIndex.end())
-            LOG_ERROR_AND_THROW("Failed to get shader group index for triangle hit group '", TriHitShader.Name, "'");
+        VERIFY(iter != NameToGroupIndex.end(),
+               "Can't find triangle hit group '", TriHitShader.Name,
+               "'. This looks to be a bug as NameToGroupIndex is initialized by "
+               "CopyRTShaderGroupNames() that processes the same hit groups.");
 
         const auto* ShaderID = pStateObjectProperties->GetShaderIdentifier(WidenString(TriHitShader.Name).c_str());
         if (ShaderID == nullptr)
@@ -259,13 +257,16 @@ void GetShaderIdentifiers(ID3D12DeviceChild*                       pSO,
 
         std::memcpy(&ShaderData[ShaderIdentifierSize * iter->second], ShaderID, ShaderIdentifierSize);
     }
+
     for (Uint32 i = 0; i < CreateInfo.ProceduralHitShaderCount; ++i)
     {
         const auto& ProcHitShader = CreateInfo.pProceduralHitShaders[i];
 
         auto iter = NameToGroupIndex.find(ProcHitShader.Name);
-        if (iter == NameToGroupIndex.end())
-            LOG_ERROR_AND_THROW("Failed to get shader group index for procedural hit shader group '", ProcHitShader.Name, "'");
+        VERIFY(iter != NameToGroupIndex.end(),
+               "Can't find procedural hit group '", ProcHitShader.Name,
+               "'. This looks to be a bug as NameToGroupIndex is initialized by "
+               "CopyRTShaderGroupNames() that processes the same hit groups.");
 
         const auto* ShaderID = pStateObjectProperties->GetShaderIdentifier(WidenString(ProcHitShader.Name).c_str());
         if (ShaderID == nullptr)
@@ -292,34 +293,24 @@ TBindingMapPerStage ExtractResourceBindingMap(const RootSignatureBuilder&       
 
             auto&       BindingMap = BindingMapPerStage[ShaderIdx];
             const auto& ResLayout  = pLayouts[LayoutIdx];
-            for (Uint32 v = 0; v < SHADER_RESOURCE_VARIABLE_TYPE_NUM_TYPES; ++v)
+
+            const auto TotalResCount = ResLayout.GetTotalResourceCount();
+            for (Uint32 i = 0; i < TotalResCount; ++i)
             {
-                auto   VarType   = static_cast<SHADER_RESOURCE_VARIABLE_TYPE>(v);
-                Uint32 ResCount  = ResLayout.GetCbvSrvUavCount(VarType);
-                Uint32 SampCount = ResLayout.GetSamplerCount(VarType);
+                const auto& Attribs = ResLayout.GetResource(i).Attribs;
+                VERIFY_EXPR(Attribs.Name != nullptr && Attribs.Name[0] != '\0');
 
-                for (Uint32 i = 0; i < ResCount; ++i)
-                {
-                    const auto& Attribs = ResLayout.GetSrvCbvUav(VarType, i).Attribs;
-                    VERIFY_EXPR(Attribs.Name != nullptr && strlen(Attribs.Name) > 0);
-
-                    auto Iter = BindingMap.emplace(HashMapStringKey{Attribs.Name}, Attribs.BindPoint).first;
-                    VERIFY_EXPR(Iter->second == Attribs.BindPoint);
-                }
-                for (Uint32 i = 0; i < SampCount; ++i)
-                {
-                    const auto& Attribs = ResLayout.GetSampler(VarType, i).Attribs;
-                    VERIFY_EXPR(Attribs.Name != nullptr && strlen(Attribs.Name) > 0);
-
-                    auto Iter = BindingMap.emplace(HashMapStringKey{Attribs.Name}, Attribs.BindPoint).first;
-                    VERIFY_EXPR(Iter->second == Attribs.BindPoint);
-                }
+                auto Iter = BindingMap.emplace(HashMapStringKey{Attribs.Name}, Attribs.BindPoint).first;
+                VERIFY(Iter->second == Attribs.BindPoint,
+                       "Resource '", Attribs.Name, "' was assigned incosistent bind points in different resource layouts. This is a bug.");
             }
         }
     };
+    // Gather resource bind points
     ExtractResources(pResourceLayouts);
     ExtractResources(pStaticLayouts);
 
+    // Gather static sampler bind points
     for (size_t i = 0; i < RootSig.GetImmutableSamplerCount(); ++i)
     {
         const auto&  ImtblSmplr = RootSig.GetImmutableSamplers()[i];
@@ -328,12 +319,16 @@ TBindingMapPerStage ExtractResourceBindingMap(const RootSignatureBuilder&       
         if (LayoutIdx < 0)
             continue;
 
-        VERIFY_EXPR(ImtblSmplr.Name.length() > 0);
-        if (ImtblSmplr.Name.empty())
+        if (ImtblSmplr.SamplerName.empty())
+        {
+            UNEXPECTED("Immutable sampler name is empty");
             continue;
+        }
 
         auto& BindingMap = BindingMapPerStage[ShaderIdx];
-        BindingMap.emplace(HashMapStringKey{ImtblSmplr.Name.c_str()}, ImtblSmplr.ShaderRegister);
+        auto  Iter       = BindingMap.emplace(HashMapStringKey{ImtblSmplr.SamplerName.c_str()}, ImtblSmplr.ShaderRegister).first;
+        VERIFY(Iter->second == ImtblSmplr.ShaderRegister,
+               "Static sampler '", ImtblSmplr.SamplerName, "' was assigned incosistent bind points in different resource layouts. This is a bug.");
     }
 
     return BindingMapPerStage;
@@ -342,14 +337,31 @@ TBindingMapPerStage ExtractResourceBindingMap(const RootSignatureBuilder&       
 } // namespace
 
 
-PipelineStateD3D12Impl::ShaderStageInfo::ShaderStageInfo(SHADER_TYPE _Type, ShaderD3D12Impl* _pShader) :
-    Type{_Type},
+PipelineStateD3D12Impl::ShaderStageInfo::ShaderStageInfo(ShaderD3D12Impl* _pShader) :
+    Type{_pShader->GetDesc().ShaderType},
     Shaders{_pShader}
 {
 }
 
 void PipelineStateD3D12Impl::ShaderStageInfo::Append(ShaderD3D12Impl* pShader)
 {
+    VERIFY_EXPR(pShader != nullptr);
+    VERIFY(std::find(Shaders.begin(), Shaders.end(), pShader) == Shaders.end(),
+           "Shader '", pShader->GetDesc().Name, "' already exists in the stage. Shaders must be deduplicated.");
+
+    const auto NewShaderType = pShader->GetDesc().ShaderType;
+    if (Type == SHADER_TYPE_UNKNOWN)
+    {
+        VERIFY_EXPR(Shaders.empty());
+        Type = NewShaderType;
+    }
+    else
+    {
+        VERIFY(Type == NewShaderType, "The type (", GetShaderTypeLiteralName(NewShaderType),
+               ") of shader '", pShader->GetDesc().Name, "' being added to the stage is incosistent with the stage type (",
+               GetShaderTypeLiteralName(Type), ").");
+    }
+
     Shaders.push_back(pShader);
 }
 
@@ -389,15 +401,14 @@ void PipelineStateD3D12Impl::InitInternalObjects(const PSOCreateInfoType& Create
     VERIFY_EXPR(Ptr == m_pStaticResourceCaches);
     (void)Ptr;
 
-    m_pShaderResourceLayouts = MemPool.ConstructArray<ShaderResourceLayoutD3D12>(NumShaderStages * 2, std::ref(*this));
+    auto* const pd3d12Device = GetDevice()->GetD3D12Device();
+    m_pShaderResourceLayouts = MemPool.ConstructArray<ShaderResourceLayoutD3D12>(NumShaderStages * 2, std::ref(*this), pd3d12Device);
 
     m_pStaticVarManagers = MemPool.Allocate<ShaderVariableManagerD3D12>(NumShaderStages);
     for (Uint32 s = 0; s < NumShaderStages; ++s)
         new (m_pStaticVarManagers + s) ShaderVariableManagerD3D12{*this, GetStaticShaderResCache(s)};
 
     InitializePipelineDesc(CreateInfo, MemPool);
-
-    RootSigBuilder.AllocateImmutableSamplers(CreateInfo.PSODesc.ResourceLayout);
 
     // It is important to construct all objects before initializing them because if an exception is thrown,
     // destructors will be called for all objects
@@ -414,11 +425,11 @@ PipelineStateD3D12Impl::PipelineStateD3D12Impl(IReferenceCounters*              
 {
     try
     {
-        RootSignatureBuilder RootSigBuilder{m_RootSig};
+        RootSignatureBuilder RootSigBuilder{m_RootSig, CreateInfo.PSODesc.ResourceLayout};
         TShaderStages        ShaderStages;
         InitInternalObjects(CreateInfo, RootSigBuilder, ShaderStages);
 
-        auto pd3d12Device = pDeviceD3D12->GetD3D12Device();
+        auto* pd3d12Device = pDeviceD3D12->GetD3D12Device();
         if (m_Desc.PipelineType == PIPELINE_TYPE_GRAPHICS)
         {
             const auto& GraphicsPipeline = GetGraphicsPipelineDesc();
@@ -620,11 +631,11 @@ PipelineStateD3D12Impl::PipelineStateD3D12Impl(IReferenceCounters*              
 {
     try
     {
-        RootSignatureBuilder RootSigBuilder{m_RootSig};
+        RootSignatureBuilder RootSigBuilder{m_RootSig, CreateInfo.PSODesc.ResourceLayout};
         TShaderStages        ShaderStages;
         InitInternalObjects(CreateInfo, RootSigBuilder, ShaderStages);
 
-        auto pd3d12Device = pDeviceD3D12->GetD3D12Device();
+        auto* pd3d12Device = pDeviceD3D12->GetD3D12Device();
 
         D3D12_COMPUTE_PIPELINE_STATE_DESC d3d12PSODesc = {};
 
@@ -677,7 +688,7 @@ PipelineStateD3D12Impl::PipelineStateD3D12Impl(IReferenceCounters*              
     {
         LocalRootSignature   LocalRootSig{CreateInfo.pShaderRecordName, CreateInfo.RayTracingPipeline.ShaderRecordSize};
         TShaderStages        ShaderStages;
-        RootSignatureBuilder RootSigBuilder{m_RootSig};
+        RootSignatureBuilder RootSigBuilder{m_RootSig, CreateInfo.PSODesc.ResourceLayout};
         InitInternalObjects(CreateInfo, RootSigBuilder, ShaderStages, &LocalRootSig);
 
         auto* pd3d12Device = pDeviceD3D12->GetD3D12Device5();
@@ -691,7 +702,7 @@ PipelineStateD3D12Impl::PipelineStateD3D12Impl(IReferenceCounters*              
         DynamicLinearAllocator             TempPool{GetRawAllocator(), 4 << 10};
         std::vector<D3D12_STATE_SUBOBJECT> Subobjects;
         std::vector<CComPtr<IDxcBlob>>     ShaderBlobs;
-        // Create ray-tracing pipeline and remap shader registers using the bind points assigned during the
+        // Create ray-tracing pipeline and remap shader registers (including static samplers) using the bind points assigned during the
         // resource layout initialization.
         BuildRTPipelineDescription(CreateInfo, Subobjects, ShaderBlobs, TempPool, pDeviceD3D12->GetDxCompiler(), BindingMapPerStage);
 
@@ -711,7 +722,9 @@ PipelineStateD3D12Impl::PipelineStateD3D12Impl(IReferenceCounters*              
         if (FAILED(hr))
             LOG_ERROR_AND_THROW("Failed to create ray tracing state object");
 
-        GetShaderIdentifiers(m_pd3d12PSO, CreateInfo, m_pRayTracingPipelineData->NameToGroupIndex, m_pRayTracingPipelineData->Shaders);
+        // Extract shader identifiers from ray tracing pipeline and store them in ShaderHandles
+        GetShaderIdentifiers(m_pd3d12PSO, CreateInfo, m_pRayTracingPipelineData->NameToGroupIndex,
+                             m_pRayTracingPipelineData->ShaderHandles, m_pRayTracingPipelineData->ShaderHandleSize);
 
         if (*m_Desc.Name != 0)
         {
@@ -803,31 +816,24 @@ void PipelineStateD3D12Impl::InitResourceLayouts(const PipelineStateCreateInfo& 
 
         m_ResourceLayoutIndex[ShaderInd] = static_cast<Int8>(s);
 
+        // Initialize all-resources layout
         m_pShaderResourceLayouts[s].Initialize(
-            pd3d12Device,
             m_Desc.PipelineType,
             ResourceLayout,
             Shaders,
             GetRawAllocator(),
-            nullptr,
-            0,
-            nullptr,
-            &RootSigBuilder,
+            RootSigBuilder,
             pLocalRoot //
         );
 
+        // Initialize static resource layout and the cache. We must do this after
+        // general layout is initialized, because we will use the bind points that
+        // may have been assigned (for ray tracing shaders).
         const SHADER_RESOURCE_VARIABLE_TYPE StaticVarType[] = {SHADER_RESOURCE_VARIABLE_TYPE_STATIC};
-        m_pShaderResourceLayouts[GetNumShaderStages() + s].Initialize(
-            pd3d12Device,
-            m_Desc.PipelineType,
-            ResourceLayout,
-            Shaders,
+        m_pShaderResourceLayouts[GetNumShaderStages() + s].InitializeStaticReourceLayout(
+            m_pShaderResourceLayouts[s],
             GetRawAllocator(),
-            StaticVarType,
-            _countof(StaticVarType),
-            m_pStaticResourceCaches + s,
-            nullptr,
-            pLocalRoot //
+            m_pStaticResourceCaches[s] //
         );
 
         m_pStaticVarManagers[s].Initialize(
