@@ -25,9 +25,9 @@ jobs:
       shell: bash
       run: cmake --build . --config Debug -j2
 
-    - name: Test
-      working-directory: ${{runner.workspace}}/build
-      shell: bash
-      run: |
-        ./${{runner.workspace}}/build/Tests/DiligentCoreTest/DiligentCoreTest
-        
+    #- name: Test
+    #  working-directory: ${{runner.workspace}}/build
+    #  shell: bash
+    #  run: |
+    #    ./${{runner.workspace}}/build/Tests/DiligentCoreTest/DiligentCoreTest
+   
